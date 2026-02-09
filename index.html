@@ -1,0 +1,2260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Manual Boolean Sourcing Tool</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      .move-button {
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+      }
+      .move-button button {
+          padding: 2px 5px;
+          font-size: 0.75rem;
+          line-height: 1rem;
+      }
+      .field-group {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+      }
+      /* Custom style for vertical alignment in GitHub section */
+      #githubSearchSection .input-column {
+        display: flex;
+        flex-direction: column;
+        gap: 1rem; /* Spacing between fields */
+      }
+      
+      /* Bulk Builder specific styles for dark theme */
+      #bulkSearchBuilderSection input[type="text"], 
+      #bulkSearchBuilderSection textarea, 
+      #bulkSearchBuilderSection select {
+          background-color: #374151; /* Deeper input background */
+          color: #F3F4F6;
+          border: 1px solid #4B5563; /* border-gray-600 */
+          padding: 0.5rem;
+          border-radius: 0.5rem;
+      }
+      #bulkSearchBuilderSection .btn-primary {
+          background-color: #0052CC; /* okta-blue */
+      }
+      #bulkSearchBuilderSection .btn-primary:hover {
+          background-color: #0044A9;
+      }
+      #bulkSearchBuilderSection .btn-secondary {
+          background-color: #4B5563;
+      }
+      #bulkSearchBuilderSection .btn-secondary:hover {
+          background-color: #374151;
+      }
+    </style>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              'okta-blue': '#0052CC',
+              'okta-light-blue': '#E9F2FF',
+              'okta-dark': '#1A1A1A'
+            },
+            fontFamily: {
+              sans: ['Inter', 'sans-serif'],
+            },
+          },
+        },
+      };
+    </script>
+    <script type="module">
+      import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+      import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+      import { getFirestore, collection, query, addDoc, onSnapshot, doc, deleteDoc, orderBy } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+
+      let db;
+      let auth;
+      let userId;
+      let isAuthReady = false;
+      let app;
+      let appId;
+      let conversationHistory = [];
+      
+      const oktaLocations = [
+          { country: "United States", value: "\"United States\"", text: "United States" },
+          { country: "United States", value: "\"Washington, District of Columbia\"", text: "Washington, District of Columbia" },
+          { country: "United States", value: "\"California, United States\"", text: "California, United States" },
+          { country: "United States", value: "\"New York, United States\"", text: "New York, United States" },
+          { country: "United States", value: "\"New York City\"", text: "New York City" },
+          { country: "United States", value: "\"San Francisco Bay Area\"", text: "San Francisco Bay Area" },
+          { country: "United States", value: "\"Bellevue, Washington\"", text: "Bellevue, Washington" },
+          { country: "United States", value: "\"Chicago, Illinois\"", text: "Chicago, Illinois" },
+          { country: "United States", value: "\"Washington DC-Baltimore Area\"", text: "Washington DC-Baltimore Area" },
+          { country: "United States", value: "\"Virginia, United States\"", text: "Virginia, United States" },
+          { country: "United States", value: "\"Seattle, Washington\"", text: "Seattle, Washington" },
+          { country: "United Kingdom", value: "\"London, England\"", text: "London, England" },
+          { country: "United Kingdom", value: "\"Greater London\"", text: "Greater London" },
+          { country: "United Kingdom", value: "\"London Area\"", text: "London Area" },
+          { country: "Ireland", value: "\"Dublin, County Dublin\"", text: "Dublin, County Dublin" },
+          { country: "France", value: "\"Paris, Île-de-France\"", text: "Paris, Île-de-France" },
+          { country: "France", value: "\"Greater Paris Metropolitan Region\"", text: "Greater Paris Metropolitan Region" },
+          { country: "Australia", value: "\"Sydney, New South Wales\"", text: "Sydney, New South Wales" },
+          { country: "Australia", value: "\"Greater Sydney Area\"", text: "Greater Sydney Area" },
+          { country: "Australia", value: "\"Melbourne, Victoria\"", text: "Melbourne, Victoria" },
+          { country: "India", value: "\"Bengaluru, Karnataka\"", text: "Bengaluru, Karnataka" },
+          { country: "Japan", value: "\"Tokyo, Tokyo\"", text: "Tokyo, Tokyo" },
+          { country: "Netherlands", value: "\"North Holland\"", text: "North Holland" },
+          { country: "Philippines", value: "\"Manila, National Capital Region\"", text: "Manila, National Capital Region" },
+          { country: "Germany", value: "\"Munich, Bavaria\"", text: "Munich, Bavaria" },
+          { country: "Korea", value: "\"Seoul, South Korea\"", text: "Seoul, South Korea" },
+          { country: "Sweden", value: "\"Stockholm, Stockholm County\"", text: "Stockholm, Stockholm County" },
+          { country: "Israel", value: "\"Tel Aviv District, Israel\"", text: "Tel Aviv District, Israel" },
+          { country: "Canada", value: "\"Toronto, Ontario\"", text: "Toronto, Ontario" },
+          { country: "Canada", value: "\"Greater Toronto Area\"", text: "Greater Toronto Area" },
+          { country: "Switzerland", value: "\"Zurich, Zurich, Switzerland\"", text: "Zurich, Zurich, Switzerland" },
+          { country: "Switzerland", value: "\"Zürich Metropolitan Area\"", text: "Zürich Metropolitan Area" },
+          { country: "Mexico", value: "\"Mexico City\"", text: "Mexico City" },
+          // New Spain Locations
+          { country: "Spain", value: "\"Barcelona, Catalonia, Spain\" OR \"Greater Barcelona Metropolitan Area\"", text: "Barcelona, Catalonia, Spain / Greater Barcelona Metropolitan Area" }
+      ];
+
+
+      // Function to show a temporary message - Moved to global scope
+      window.showMessage = (message, colorClass) => {
+          const messageBox = document.getElementById('messageBox');
+          if (!messageBox) {
+              console.warn("MessageBox element not found.");
+              return;
+          }
+          messageBox.textContent = message;
+          messageBox.className = `block mt-4 p-3 rounded-md text-sm text-center font-medium ${colorClass} transition duration-300`;
+          setTimeout(() => {
+              messageBox.className = "hidden";
+          }, 3000);
+      };
+      
+      // Function to dynamically update the company section description based on the search mode
+      window.updateCompanyDescription = () => {
+          const mode = document.getElementById('companySearchMode').value;
+          const display = document.getElementById('companyOperatorDisplay');
+          const description = document.getElementById('companyDescription');
+
+          if (mode === 'INANCHOR') {
+              display.textContent = 'inanchor: |';
+              description.innerHTML = 'Enter company names separated by commas or newlines. They will be converted to an **`inanchor:`** search string, which targets profiles linking to those company websites.';
+          } else {
+              display.textContent = '"Company 1" OR "Company 2"';
+              description.innerHTML = 'Enter company names separated by commas or newlines. They will be converted to a plain **`OR`** text search. Quotes are added automatically for multi-word entries.';
+          }
+      };
+      
+      // Function to dynamically update the job title section description based on the search mode
+      window.updateJobTitleDescription = () => {
+          const mode = document.getElementById('jobTitleSearchMode').value;
+          const display = document.getElementById('jobTitleOperatorDisplay');
+          const description = document.getElementById('jobTitleDescription');
+
+          if (mode === 'INTITLE') {
+              display.textContent = 'intitle: |';
+              description.innerHTML = 'Enter job titles. They will use the **`intitle:`** operator for accuracy, targeting the current or primary title in the profile headline. Titles are combined with **OR** logic.';
+          } else {
+              display.textContent = '"Title 1" OR "Title 2"';
+              description.innerHTML = 'Enter job titles. They will be converted to a plain **`OR`** text search, searching all text on the page. Quotes are added automatically for multi-word entries.';
+          }
+      };
+
+
+      // Function to populate Okta Hub locations based on selected country
+      window.populateOktaHubLocations = (selectedCountry) => {
+          const oktaHubSelect = document.getElementById('oktaHubLocation');
+          oktaHubSelect.innerHTML = ''; // Clear existing options
+          
+          // --- FIX: Map "United States/Anywhere" display text to internal "United States" key ---
+          const internalCountryKey = selectedCountry === 'United States/Anywhere' ? 'United States' : selectedCountry;
+
+          const filteredLocations = internalCountryKey
+              ? oktaLocations.filter(loc => loc.country === internalCountryKey || (loc.country === 'Spain' && internalCountryKey === 'Spain')) 
+              : oktaLocations;
+          // --- END FIX ---
+
+          // Add a default, non-selectable option
+          if (!internalCountryKey) {
+              const defaultOption = document.createElement('option');
+              defaultOption.text = "Select Hub Location(s)";
+              defaultOption.value = "";
+              defaultOption.disabled = true;
+              defaultOption.selected = true;
+              oktaHubSelect.add(defaultOption);
+          }
+
+
+          filteredLocations.forEach(loc => {
+              const option = document.createElement('option');
+              option.value = loc.value;
+              option.text = loc.text;
+              oktaHubSelect.add(option);
+          });
+      };
+
+
+      window.onload = async function() {
+          try {
+              appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+              const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+
+
+              if (!app) {
+                  app = initializeApp(firebaseConfig);
+                  db = getFirestore(app);
+                  auth = getAuth(app);
+
+
+                  onAuthStateChanged(auth, async (user) => {
+                      if (user) {
+                          userId = user.uid;
+                          isAuthReady = true;
+                          console.log('User is signed in with UID:', userId);
+                          // Removed saved queries listener, as the feature is removed
+                      } else {
+                          try {
+                              if (typeof __initial_auth_token !== 'undefined') {
+                                  await signInWithCustomToken(auth, __initial_auth_token);
+                              } else {
+                                  await signInAnonymously(auth);
+                              }
+                          } catch (error) {
+                              console.error("Firebase auth error:", error);
+                          }
+                      }
+                  });
+              }
+          } catch (e) {
+              console.error("Initialization error:", e);
+          }
+          
+          const searchSelector = document.getElementById('searchSelector');
+          searchSelector.addEventListener('change', window.toggleSearchSection);
+          
+          const countrySelector = document.getElementById('countryOperator');
+          countrySelector.addEventListener('change', (event) => {
+              const selectedCountryName = event.target.options[event.target.selectedIndex].text;
+              window.populateOktaHubLocations(selectedCountryName);
+          });
+          
+          window.populateOktaHubLocations(countrySelector.options[countrySelector.selectedIndex].text);
+          window.updateCompanyDescription();
+          window.updateJobTitleDescription();
+      };
+      
+      window.toggleSearchSection = () => {
+          const selectedValue = document.getElementById('searchSelector').value;
+          // Updated sections list to include the new bulk builder
+          const sections = ['linkedinSearchSection', 'githubSearchSection', 'stackoverflowSearchSection', 'behanceSearchSection', 'xraySearchSection', 'dribbbleSearchSection', 'xingSearchSection', 'crunchbaseSearchSection', 'zoominfoSearchSection', 'instagramSearchSection', 'xcomSearchSection', 'kaggleSearchSection', 'githubioSearchSection', 'googleAdvancedOperatorsSection', 'quoraSearchSection', 'redditSearchSection', 'googleVsLinkedInSection', 'linkedinInstructionsSection', 'mediumSearchSection', 'bulkSearchBuilderSection'];
+          
+          sections.forEach(sectionId => {
+              const section = document.getElementById(sectionId);
+              if (section) {
+                  section.classList.add('hidden');
+              }
+          });
+
+          if (selectedValue) {
+              const selectedSection = document.getElementById(selectedValue);
+              if (selectedSection) {
+                  selectedSection.classList.remove('hidden');
+              }
+          }
+      };
+
+
+      window.clearFields = () => {
+          const fieldIds = [
+              'companyList', 'jobTitleList',
+              'keywords1', 'keywords2', 'exactPhrase', 'proximityKeywords',
+              'headlineAboutKeywords', 'countryOperator', 'cityOperator', 'oktaHubLocation',
+              'excludeKeywords', 'outputString', 'gitHubLocation', 'gitHubLanguage',
+              'gitHubSkill', 'gitHubFullName', 'xrayTopic', 'xrayDomain',
+              'stackoverflowLanguage', 'stackoverflowLocation', 'behanceKeywords',
+              'behanceField', 'behanceLocation', 'dribbbleLocation', 'xingSkills',
+              'xingLocation', 'mediumTopic',
+              'mediumLocation', 'mediumName', 'crunchbaseCompany', 'zoominfoJobTitle',
+              'instagramSkills', 'instagramLocation', 'xcomSkills', 'xcomLocation',
+              'kaggleSkills', 'kaggleLocation', 'githubioSkills', 'githubioLocation',
+              'googleOperatorsOutput',
+              'quoraKeyword', 'redditKeyword',
+              'keywords1Operator', 'keywords2Operator', 
+              'companySearchMode', 'jobTitleSearchMode',
+              'gitHubGeneralKeyword',
+              'gitHubReadMeKeyword' // Added ReadMe keyword field
+          ];
+          
+          fieldIds.forEach(id => {
+              const element = document.getElementById(id);
+              if (element) {
+                  if (element.tagName === 'SELECT') {
+                      element.value = element.getAttribute('data-default') || (id === 'companySearchMode' || id === 'jobTitleSearchMode' ? 'INTITLE' : '');
+                      Array.from(element.options).forEach(opt => opt.selected = opt.defaultSelected);
+                  } else {
+                      element.value = '';
+                  }
+              }
+          });
+          
+          // Manually reset specific dropdowns that need a default selected value
+          const defaultOperators = ['keywords1Operator', 'keywords2Operator']; 
+          defaultOperators.forEach(id => {
+              const element = document.getElementById(id);
+              if (element) element.value = element.getAttribute('data-default') || 'OR';
+          });
+          
+          // Reset search mode selectors and update descriptions
+          document.getElementById('companySearchMode').value = 'INANCHOR';
+          window.updateCompanyDescription();
+          document.getElementById('jobTitleSearchMode').value = 'INTITLE';
+          window.updateJobTitleDescription();
+
+          // Reset GitHub General Search Type dropdown
+          document.getElementById('gitHubGeneralSearchType').value = 'users';
+          document.getElementById('gitHubReadMeLanguage').value = '';
+          document.getElementById('gitHubReadMeLocation').value = '';
+
+          // Clear and reset the Okta Hub location selection
+          const oktaHubSelect = document.getElementById('oktaHubLocation');
+          if (oktaHubSelect) {
+              Array.from(oktaHubSelect.options).forEach(opt => opt.selected = false);
+              
+              const countrySelector = document.getElementById('countryOperator');
+              
+              // SAFELY get the selected country name, defaulting to the text of the first option ('United States/Anywhere')
+              let countryName = '';
+              if (countrySelector && countrySelector.options.length > 0) {
+                  const selectedIndex = countrySelector.selectedIndex;
+                  // If selectedIndex is -1 (meaning no option is selected after clearing fields), default to the first option's text.
+                  countryName = selectedIndex >= 0 
+                      ? countrySelector.options[selectedIndex].text 
+                      : countrySelector.options[0].text; 
+              }
+
+              if (countryName) {
+                  window.populateOktaHubLocations(countryName);
+              }
+          }
+
+          // Reset the search selector dropdown
+          const searchSelector = document.getElementById('searchSelector');
+          if(searchSelector) {
+            searchSelector.value = '';
+          }
+          window.toggleSearchSection();
+
+          showMessage("All fields cleared.", "bg-gray-200 text-gray-700");
+      };
+
+      // --- Bulk Builder specific functions ---
+
+      window.clearBulkSearchFields = () => {
+          document.getElementById('inputData').value = '';
+          document.getElementById('outputUrls').value = '';
+          document.getElementById('searchEngine').value = 'google';
+          document.getElementById('locationFilter').value = '';
+          document.getElementById('jobTitleFilter').value = '';
+          document.getElementById('companyFilter').value = '';
+          document.getElementById('skillsFilter').value = '';
+          showMessage("Bulk search fields cleared.", "bg-gray-200 text-gray-700");
+      };
+
+      const formatBulkTerms = (input, separator = ',') => {
+          return input.split(separator)
+                      .map(k => k.trim())
+                      .filter(k => k.length > 0)
+                      .map(k => k.includes(' ') ? `"${k}"` : k)
+                      .join(' OR ');
+      };
+      
+      window.generateUrls = () => {
+          const inputData = document.getElementById('inputData').value.trim();
+          const searchEngine = document.getElementById('searchEngine').value;
+          const location = document.getElementById('locationFilter').value.trim();
+          const jobTitle = document.getElementById('jobTitleFilter').value.trim();
+          const company = document.getElementById('companyFilter').value.trim();
+          const skills = document.getElementById('skillsFilter').value.trim();
+          const outputTextarea = document.getElementById('outputUrls');
+
+          if (!inputData) {
+              showMessage("Please paste a list of names or GitHub handles.", "bg-yellow-400/20 text-yellow-300");
+              outputTextarea.value = '';
+              return;
+          }
+
+          let finalUrls = [];
+          const lines = inputData.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+          
+          let refinementQuery = '';
+
+          if (searchEngine === 'google') {
+              // Build the optional refinement query string ONLY for Google X-Ray search
+              if (location) {
+                  refinementQuery += ` AND "${location}"`;
+              }
+              if (jobTitle) {
+                  refinementQuery += ` AND (${formatBulkTerms(jobTitle, ',')})`;
+              }
+              if (company) {
+                  refinementQuery += ` AND (${formatBulkTerms(company, ',')})`;
+              }
+              if (skills) {
+                  refinementQuery += ` AND (${formatBulkTerms(skills, ',')})`;
+              }
+          }
+
+          // Build the final URLs
+          lines.forEach(line => {
+              let searchLine = line;
+              // Clean up if a GitHub URL is used as input
+              if (line.includes('github.com')) {
+                  // Extracts the username from a typical URL structure
+                  const match = line.match(/github\.com\/([a-zA-Z0-9_-]+)/);
+                  searchLine = match ? match[1] : line; 
+              }
+
+              let finalQuery = `${searchLine}${refinementQuery}`;
+              
+              if (searchEngine === 'google') {
+                  // Google search on LinkedIn profiles with refinements
+                  const baseUrl = "https://www.google.com/search?q=site:linkedin.com/in+";
+                  finalUrls.push(baseUrl + encodeURIComponent(finalQuery));
+              } else if (searchEngine === 'linkedin') {
+                  // Direct LinkedIn search (uses its internal search parameter) - NO refinements added
+                  const baseUrl = "https://www.linkedin.com/search/results/people/?keywords=";
+                  finalUrls.push(baseUrl + encodeURIComponent(searchLine));
+              }
+          });
+
+          outputTextarea.value = finalUrls.join('\n');
+          showMessage(`Generated ${finalUrls.length} URL${finalUrls.length === 1 ? '' : 's'} for ${searchEngine === 'linkedin' ? 'LinkedIn' : 'Google X-Ray'} search.`, "bg-green-400/20 text-green-300");
+      };
+
+      window.copyUrls = () => {
+          const outputTextarea = document.getElementById('outputUrls');
+          if (!outputTextarea.value) {
+              showMessage("No URLs to copy. Please generate them first.", "bg-yellow-400/20 text-yellow-300");
+              return;
+          }
+          outputTextarea.select();
+          document.execCommand('copy');
+          window.getSelection().removeAllRanges();
+          showMessage("All URLs copied to clipboard!", "bg-green-400/20 text-green-300");
+      };
+      
+      window.openInBulk = () => {
+          const urls = document.getElementById('outputUrls').value.trim().split('\n').filter(url => url.startsWith('http'));
+
+          if (urls.length === 0) {
+              showMessage("No valid URLs to open. Please generate them first.", "bg-yellow-400/20 text-yellow-300");
+              return;
+          }
+
+          let openCount = 0;
+          urls.forEach((url, index) => {
+              // Open tabs with a safe 2.5 second delay (2500ms) to avoid browser blocking
+              setTimeout(() => {
+                  window.open(url, '_blank');
+                  openCount++;
+                  if (openCount === urls.length) {
+                      showMessage(`${urls.length} tabs opened in bulk!`, "bg-green-400/20 text-green-300");
+                  }
+              }, index * 2500); 
+          });
+      };
+      // --- End Bulk Builder specific functions ---
+
+
+      window.copyToClipboardText = (text) => {
+          const tempInput = document.createElement('textarea');
+          tempInput.value = text;
+          document.body.appendChild(tempInput);
+          tempInput.select();
+          document.execCommand('copy');
+          document.body.removeChild(tempInput);
+          showMessage("Query copied to clipboard!", "bg-blue-100 text-blue-700");
+      };
+
+      window.moveField = (elementId, direction) => {
+          const element = document.getElementById(elementId);
+          if (!element) return;
+          const parent = element.parentElement;
+          const siblings = Array.from(parent.children).filter(child => child.id && child.classList.contains('movable-field'));
+          const index = siblings.indexOf(element);
+
+          if (direction === 'up' && index > 0) {
+              parent.insertBefore(element, siblings[index - 1]);
+          } else if (direction === 'down' && index < siblings.length - 1) {
+              parent.insertBefore(element, siblings[index + 1].nextSibling);
+          }
+      };
+     
+      // REMOVED: window.findRelatedTitles
+      // REMOVED: window.getSourcingSuggestions
+      // REMOVED: window.generateInMail
+      // REMOVED: window.copyInMail
+      // REMOVED: window.toggleGeminiFeatures
+      // REMOVED: window.clearInsightFields
+      // REMOVED: window.getHiringManagerInsight
+      // REMOVED: window.generateScreeningQuestions
+      // REMOVED: window.generateNaturalLanguageQuery
+      // REMOVED: window.findCompetitors
+      // REMOVED: window.copyCompetitorsToNotepad
+
+      window.copyToClipboard = () => {
+          const output = document.getElementById('outputString');
+          if (!output.value) {
+              showMessage("No query to copy. Please generate one first.", "bg-yellow-100 text-yellow-700");
+              return;
+          }
+
+          output.select();
+          output.setSelectionRange(0, 99999);
+          document.execCommand('copy');
+          window.getSelection().removeAllRanges();
+          showMessage("Copied to clipboard!", "bg-green-100 text-green-700");
+      };
+
+      // Function to open the generated query in a new browser tab
+      window.openInBrowser = (browser) => {
+          const query = document.getElementById('outputString');
+          if (!query.value.trim()) {
+              showMessage("Please generate a query first.", "bg-red-100 text-red-700");
+              return;
+          }
+
+          const encodedQuery = encodeURIComponent(query.value);
+          let url = "";
+
+          if (browser === "Google") {
+              url = `https://www.google.com/search?q=${encodedQuery}`;
+          } else if (browser === "Bing") {
+              url = `https://www.bing.com/search?q=${encodedQuery}`;
+          }
+
+          if (url) {
+              window.open(url, '_blank');
+          }
+      };
+      
+      // Function to copy to notepad
+      window.copyToNotepad = () => {
+          const query = document.getElementById('outputString').value.trim();
+          if (!query) {
+              showMessage("Please generate a query first.", "bg-red-100 text-red-700");
+              return;
+          }
+
+          // Copy to clipboard
+          const tempInput = document.createElement('textarea');
+          tempInput.value = query;
+          document.body.appendChild(tempInput);
+          tempInput.select();
+          document.execCommand('copy');
+          document.body.removeChild(tempInput);
+          
+          // Open notepad and show message
+          window.open('https://onlinenotepad.org/notepad', '_blank');
+          showMessage("Query copied to clipboard. Paste it into the Notepad.", "bg-green-100 text-green-700");
+      };
+
+      // GitHub specific search function
+      window.openInGitHub = () => {
+          const location = document.getElementById('gitHubLocation').value.trim();
+          const language = document.getElementById('gitHubLanguage').value.trim();
+          const skillTopic = document.getElementById('gitHubSkill').value.trim();
+          const fullName = document.getElementById('gitHubFullName').value.trim();
+
+          // Construct the URL for GitHub's advanced search
+          let url = "https://github.com/search?type=users&q=";
+          let params = [];
+          
+          if (language) {
+              params.push(`language:${encodeURIComponent(language)}`);
+          }
+          if (skillTopic) {
+              params.push(encodeURIComponent(skillTopic));
+          }
+          if (location) {
+              params.push(`location:${encodeURIComponent(location)}`);
+          }
+          if (fullName) {
+              params.push(`fullname:"${encodeURIComponent(fullName)}"`);
+          }
+
+          url += params.join('+');
+          
+          if (params.length === 0) {
+              showMessage("Please fill in at least one GitHub field or generate a query first.", "bg-yellow-100 text-yellow-700");
+              return;
+          }
+
+          window.open(url, '_blank');
+      };
+      
+      // GitHub General Search function (for Repositories, Topics, Users, Discussions, Wikis)
+      window.openInGitHubGeneralSearch = () => {
+          const keyword = document.getElementById('gitHubGeneralKeyword').value.trim();
+          const searchType = document.getElementById('gitHubGeneralSearchType').value;
+
+          if (!keyword) {
+              showMessage("Please enter a keyword for the general search.", "bg-yellow-100 text-yellow-700");
+              return;
+          }
+          
+          // Use the search endpoint pattern: https://github.com/search?q=<keyword>&type=<type>
+          const url = `https://github.com/search?q=${encodeURIComponent(keyword)}&type=${searchType}`;
+          window.open(url, '_blank');
+      };
+
+      // GitHub Read Me Search function
+      window.openInGitHubReadMe = () => {
+          const keyword = document.getElementById('gitHubReadMeKeyword').value.trim();
+          const language = document.getElementById('gitHubReadMeLanguage').value.trim();
+          const location = document.getElementById('gitHubReadMeLocation').value.trim();
+
+          if (!keyword && !language && !location) {
+              showMessage("Please fill in at least one field for the Read Me search.", "bg-yellow-100 text-yellow-700");
+              return;
+          }
+          
+          // UPDATED: Removed 'inurl:readme'
+          let queryParts = [
+              'site:github.com/',
+              '"following"',
+              '("block" OR "report")'
+          ];
+          
+          if (keyword) {
+              // Keywords are joined by OR by default, using space to separate if multiple
+              const keywordsArray = keyword.split(',').map(k => k.trim()).filter(k => k.length > 0);
+              const formattedKeywords = keywordsArray.map(k => k.includes(' ') ? `"${k}"` : k).join(' OR ');
+              queryParts.push(`(${formattedKeywords})`);
+          }
+          
+          if (language) {
+              queryParts.push(`"${language}"`);
+          }
+          
+          if (location) {
+              queryParts.push(`"${location}"`);
+          }
+
+          const queryString = queryParts.join(' AND ');
+          const encodedQuery = encodeURIComponent(queryString);
+          const url = `https://www.google.com/search?q=${encodedQuery}`;
+          window.open(url, '_blank');
+      };
+
+
+      // Function for Stack Overflow search
+      window.openInStackOverflow = () => {
+        const language = document.getElementById('stackoverflowLanguage').value.trim();
+        const location = document.getElementById('stackoverflowLocation').value.trim();
+        
+        if (!language && !location) {
+            showMessage("Please enter at least one keyword for language or location.", "bg-yellow-100 text-yellow-700");
+            return;
+        }
+
+        let queryParts = ['site:stackoverflow.com/users'];
+        if (language) {
+            queryParts.push(`("${language}")`);
+        }
+        if (location) {
+            queryParts.push(`("${location}")`);
+        }
+        
+        const queryString = queryParts.join(' AND ');
+        const encodedQuery = encodeURIComponent(queryString);
+        const url = `https://www.google.com/search?q=${encodedQuery}`;
+        window.open(url, '_blank');
+      };
+      
+      // Function for Behance search
+      window.openInBehance = () => {
+          const keywords = document.getElementById('behanceKeywords').value.trim();
+          const field = document.getElementById('behanceField').value.trim();
+          const location = document.getElementById('behanceLocation').value.trim();
+
+          if (!keywords && !field && !location) {
+              showMessage("Please enter at least one keyword, field, or location.", "bg-yellow-100 text-yellow-700");
+              return;
+          }
+
+          let queryParts = ['site:behance.net'];
+          
+          if (keywords) {
+            const keywordList = keywords.split(',').map(k => `"${k.trim()}"`).join(' OR ');
+            queryParts.push(`(${keywordList})`);
+          }
+          if (field) {
+              queryParts.push(`"${field}"`);
+          }
+          if (location) {
+              queryParts.push(`("${location}")`);
+          }
+          
+          const queryString = queryParts.join(' ');
+          const encodedQuery = encodeURIComponent(queryString);
+          const url = `https://www.google.com/search?q=${encodedQuery}`;
+          window.open(url, '_blank');
+      };
+
+      // Function for Dribbble search
+      window.openInDribbble = () => {
+          const location = document.getElementById('dribbbleLocation').value.trim();
+
+          if (!location) {
+              showMessage("Please enter a location.", "bg-yellow-100 text-yellow-700");
+              return;
+          }
+
+          const encodedLocation = encodeURIComponent(location);
+          const url = `https://dribbble.com/designers?location=${encodedLocation}`;
+          window.open(url, '_blank');
+      };
+
+
+      // Function to open an X-ray search in a new browser tab
+      window.openXraySearch = () => {
+          const domain = document.getElementById('xrayDomain').value.trim();
+          const topic = document.getElementById('xrayTopic').value.trim();
+          const location = document.getElementById('xrayLocation').value.trim();
+
+          if (!domain && !topic && !location) {
+              showMessage("Please enter at least one value to search.", "bg-yellow-100 text-yellow-700");
+              return;
+          }
+
+          let queryParts = [];
+          if (domain) {
+              queryParts.push(`site:${domain}`);
+          }
+          if (topic) {
+              queryParts.push(`(${topic})`);
+          }
+          if (location) {
+              queryParts.push(`(${location})`);
+          }
+
+          const queryString = queryParts.join(' AND ');
+          
+          const encodedQuery = encodeURIComponent(queryString);
+          const url = `https://www.google.com/search?q=${encodedQuery}`;
+
+          window.open(url, '_blank');
+      };
+
+      // Function to add email domains to the query
+      window.addEmailDomains = () => {
+          const outputString = document.getElementById('outputString');
+
+          if (!outputString.value.trim()) {
+              showMessage("Please generate a query first.", "bg-yellow-100 text-yellow-700");
+              return;
+          }
+          
+          const emailString = `("gmail.com" OR "hotmail.com" OR "yahoo.com" OR "outlook.com" OR "aol.com" OR "comcast.net" OR "icloud.com" OR "msn.com" OR "hotmail.co.uk" OR "live.com" OR "yahoo.co.in" OR "me.com" OR "rediffmail.com" OR "yahoo.co.uk")`;
+          let currentQuery = outputString.value.trim();
+          
+          if (!currentQuery.includes(emailString)) {
+              outputString.value = `${currentQuery} AND ${emailString}`;
+              showMessage("Email domains added to query.", "bg-green-100 text-green-700");
+          } else {
+              showMessage("Email domains are already in the query.", "bg-yellow-100 text-yellow-700");
+          }
+      };
+
+      // Function to add Sales Club Winners string to the query
+      window.addSalesClubWinners = () => {
+          const outputString = document.getElementById('outputString');
+          const salesWinnersString = `("president's club" OR "quota attainment" OR "club winner" OR "high performers" OR "peak performers" OR "Sales Excellence Award" OR "Top Performer Award" OR "Chairman’s Club" OR "Circle of Excellence" OR "Achiever’s Club" OR "100% Club" OR "Summit Club" OR "Platinum Club" OR "president’s Circle" OR "Peak Performance Award" OR "Elite Performers Club" OR "Distinguished Sales Award" OR "Sales Champion" OR "High Achievers Club" OR "Victory Club")`;
+          
+          let currentQuery = outputString.value.trim();
+          
+          // Check if any part of the long string is already present (using one key phrase for simplicity)
+          if (!currentQuery.includes("president's club")) {
+              // Prepend "AND" if a query already exists, otherwise just use the string
+              outputString.value = currentQuery.length > 0 ? `${currentQuery} AND ${salesWinnersString}` : salesWinnersString;
+              showMessage("Sales Club Winners string added to query.", "bg-green-100 text-green-700");
+          } else {
+              showMessage("Sales Club Winners string is already in the query.", "bg-yellow-100 text-yellow-700");
+          }
+      };
+      
+      const initializeMoveButtons = () => {
+          const movableFields = document.querySelectorAll('.movable-field');
+          movableFields.forEach(field => {
+              const moveButtons = field.querySelector('.move-button');
+              if (moveButtons) {
+                  moveButtons.innerHTML = `
+                      <button onclick="window.moveField('${field.id}', 'up')" class="bg-gray-600 text-white hover:bg-gray-500 rounded-sm">▲</button>
+                      <button onclick="window.moveField('${field.id}', 'down')" class="bg-gray-600 text-white hover:bg-gray-500 rounded-sm">▼</button>
+                  `;
+              }
+          });
+      };
+      
+      const renderPage = () => {
+        initializeMoveButtons();
+        window.toggleSearchSection();
+      };
+      
+      window.addEventListener('load', renderPage);
+
+      // Function to open the Kaggle.com search in a new browser tab
+      window.openInKaggle = () => {
+          const skillsOrInput = document.getElementById('kaggleSkills').value.trim();
+          const locationInput = document.getElementById('kaggleLocation').value.trim();
+
+          if (!skillsOrInput && !locationInput) {
+              showMessage("Please enter at least one keyword for skills or a location.", "bg-yellow-100 text-yellow-700");
+              return;
+          }
+
+          let queryParts = ['site:kaggle.com'];
+
+          if (skillsOrInput) {
+              const skillsArray = skillsOrInput.split(',').map(s => s.trim()).filter(s => s.length > 0);
+              const formattedSkills = skillsArray.map(s => `"${s}"`).join(' OR ');
+              queryParts.push(`(${formattedSkills})`);
+          }
+          
+          if (locationInput) {
+              queryParts.push(`(${locationInput})`);
+          }
+
+          const query = queryParts.join(' AND ');
+          const encodedQuery = encodeURIComponent(query);
+          const url = `https://www.google.com/search?q=${encodedQuery}`;
+          window.open(url, '_blank');
+      };
+
+      // Function to open the Github.io search in a new browser tab
+      window.openInGithubIo = () => {
+        const skillsOrInput = document.getElementById('githubioSkills').value.trim();
+        const locationInput = document.getElementById('githubioLocation').value.trim();
+
+        if (!skillsOrInput && !locationInput) {
+            showMessage("Please enter at least one keyword for skills or a location.", "bg-yellow-100 text-yellow-700");
+            return;
+        }
+
+        let queryParts = ['site:github.io'];
+
+        if (skillsOrInput) {
+            const skillsArray = skillsOrInput.split(',').map(s => s.trim()).filter(s => s.length > 0);
+            const formattedSkills = skillsArray.map(s => `"${s}"`).join(' OR ');
+            queryParts.push(`(${formattedSkills})`);
+        }
+
+        if (locationInput) {
+            queryParts.push(`(${locationInput})`);
+        }
+        
+        const query = queryParts.join(' AND ');
+        const encodedQuery = encodeURIComponent(`${query} ~resume`);
+        const url = `https://www.google.com/search?q=${encodedQuery}`;
+        window.open(url, '_blank');
+      };
+
+      // REMOVED: window.openInAboutMe
+      
+      // Function to open the Google Advanced Search in a new browser tab
+      window.openInGoogleAdvanced = () => {
+          const query = document.getElementById('googleOperatorsOutput').value.trim();
+          if (!query) {
+              showMessage("Please enter a query in the output box.", "bg-red-100 text-red-700");
+              return;
+          }
+          const encodedQuery = encodeURIComponent(query);
+          window.open(`https://www.google.com/search?q=${encodedQuery}`, '_blank');
+      };
+
+      // Function to copy Google Advanced Search to notepad
+      window.copyGoogleAdvancedToNotepad = () => {
+          const query = document.getElementById('googleOperatorsOutput').value.trim();
+          if (!query) {
+              showMessage("Please enter a query in the output box.", "bg-red-100 text-red-700");
+              return;
+          }
+          const tempInput = document.createElement('textarea');
+          tempInput.value = query;
+          document.body.appendChild(tempInput);
+          document.execCommand('copy');
+          document.body.removeChild(tempInput);
+          window.open('https://onlinenotepad.org/notepad', '_blank');
+          showMessage("Query copied to notepad. Paste it into the Notepad.", "bg-green-100 text-green-700");
+      };
+      
+      // Function to open Quora search in a new browser tab
+      window.openInQuora = () => {
+        const keywordInput = document.getElementById('quoraKeyword').value.trim();
+
+        if (!keywordInput) {
+            showMessage("Please enter a keyword for your search.", "bg-yellow-100 text-yellow-700");
+            return;
+        }
+
+        const formattedKeyword = keywordInput.includes(' ') ? `"${keywordInput}"` : keywordInput;
+        const query = `site:quora.com intitle:${formattedKeyword}`;
+        const encodedQuery = encodeURIComponent(query);
+        const url = `https://www.google.com/search?q=${encodedQuery}`;
+        window.open(url, '_blank');
+      };
+      
+      // Function to open Reddit search in a new browser tab
+      window.openInReddit = () => {
+        const keywordInput = document.getElementById('redditKeyword').value.trim();
+
+        if (!keywordInput) {
+            showMessage("Please enter a keyword for your search.", "bg-yellow-100 text-yellow-700");
+            return;
+        }
+
+        const formattedKeyword = keywordInput.includes(' ') ? `"${keywordInput}"` : keywordInput;
+        const query = `site:reddit.com intitle:${formattedKeyword}`;
+        const encodedQuery = encodeURIComponent(query);
+        const url = `https://www.google.com/search?q=${encodedQuery}`;
+        window.open(url, '_blank');
+      };
+
+      // REMOVED: window.openInForem
+
+      // Function to split keywords and add quotes
+      function formatKeywords(input, separator = ',') {
+          return input.split(separator)
+                      .map(k => k.trim())
+                      .filter(k => k.length > 0)
+                      .map(k => k.includes(' ') ? `"${k}"` : k);
+      }
+      
+      // Function to format company names (handles both commas and newlines)
+      function formatCompanies(input, mode) {
+          const companies = input.replace(/\n/g, ',').split(',')
+                      .map(c => c.trim())
+                      .filter(c => c.length > 0);
+
+          if (companies.length === 0) return { list: [], query: '' };
+          
+          if (mode === 'INANCHOR') {
+              // inanchor:company1|company2|...
+              const inanchorString = `inanchor:${companies.join('|')}`;
+              return { list: companies, query: `(${inanchorString})` };
+          } else {
+              // "company 1" OR "company 2"
+              const quotedCompanies = companies.map(c => c.includes(' ') ? `"${c}"` : c);
+              return { list: companies, query: `(${quotedCompanies.join(' OR ')})` };
+          }
+      }
+      
+      // Function to format job titles
+      function formatJobTitles(input, operator, mode) {
+          const titles = input.replace(/\n/g, ',').split(',')
+                          .map(t => t.trim())
+                          .filter(t => t.length > 0);
+
+          if (titles.length === 0) return '';
+          
+          let formattedTitles;
+          if (mode === 'INTITLE') {
+              // intitle:"title"
+              formattedTitles = titles.map(t => `intitle:"${t}"`); 
+          } else {
+              // "title" (standard text search)
+              formattedTitles = titles.map(t => t.includes(' ') ? `"${t}"` : t);
+          }
+          
+          // Since the operator button is removed, we hardcode to OR
+          const fixedOperator = 'OR';
+          
+          // If multiple titles, wrap them in parentheses joined by the operator
+          if (formattedTitles.length > 1) {
+              return `(${formattedTitles.join(` ${fixedOperator} `)})`;
+          }
+          // If only one title, return it as is
+          return formattedTitles[0]; 
+      }
+
+      // Main function to generate the boolean query string
+      window.generateQuery = () => {
+          // Read search modes
+          let companySearchMode = document.getElementById('companySearchMode').value;
+          let jobTitleSearchMode = document.getElementById('jobTitleSearchMode').value;
+
+          // Read raw inputs and operators
+          let companyListRaw = document.getElementById('companyList').value;
+          let jobTitleListRaw = document.getElementById('jobTitleList').value;
+          // Hardcode Job Title Operator to 'OR' as the selector was removed
+          let jobTitleOperator = 'OR';
+          
+          let keywords1 = formatKeywords(document.getElementById('keywords1').value);
+          let keywords2 = formatKeywords(document.getElementById('keywords2').value);
+
+          let keywords1Operator = document.getElementById('keywords1Operator')?.value || 'OR';
+          let keywords2Operator = document.getElementById('keywords2Operator')?.value || 'AND';
+          
+          let exactPhrase = document.getElementById('exactPhrase').value.trim();
+          let proximityKeywords = document.getElementById('proximityKeywords').value.trim();
+          let headlineAboutKeywords = document.getElementById('headlineAboutKeywords').value.trim();
+          let excludeKeywords = formatKeywords(document.getElementById('excludeKeywords').value);
+          let countryOperator = document.getElementById('countryOperator').value;
+          let cityOperator = document.getElementById('cityOperator').value.trim();
+          
+          const oktaHubSelect = document.getElementById('oktaHubLocation');
+          const selectedOktaHubs = Array.from(oktaHubSelect.options)
+              .filter(opt => opt.selected)
+              .map(opt => opt.value);
+
+          // Apply formatting based on selected mode
+          let { query: formattedCompaniesQuery } = formatCompanies(companyListRaw, companySearchMode);
+          let formattedJobTitlesQuery = formatJobTitles(jobTitleListRaw, jobTitleOperator, jobTitleSearchMode);
+
+
+          let queryParts = [];
+
+          if (countryOperator) {
+              if (cityOperator) {
+                  queryParts.push(`${countryOperator} (${cityOperator})`);
+              } else {
+                  queryParts.push(countryOperator);
+              }
+          }
+          
+          if (selectedOktaHubs.length > 0) {
+              queryParts.push(`(${selectedOktaHubs.join(' OR ')})`);
+          }
+
+          // Company List (using selected mode)
+          if (formattedCompaniesQuery) {
+              queryParts.push(formattedCompaniesQuery);
+          }
+
+          // Job Titles (using selected mode)
+          if (formattedJobTitlesQuery) {
+              queryParts.push(formattedJobTitlesQuery);
+          }
+
+          // Dynamic Keyword Groups (1-2)
+          const keywordGroups = [
+              { keywords: keywords1, operator: keywords1Operator },
+              { keywords: keywords2, operator: keywords2Operator },
+          ];
+
+          keywordGroups.forEach(group => {
+              if (group.keywords.length > 0) {
+                  let groupQuery = group.keywords.join(` ${group.operator} `);
+                  
+                  // Add parentheses ONLY if the operator is OR
+                  if (group.operator === 'OR') {
+                      queryParts.push(`(${groupQuery})`);
+                  } else {
+                      queryParts.push(groupQuery);
+                  }
+              }
+          });
+
+          if (exactPhrase) {
+              queryParts.push(`"${exactPhrase}"`);
+          }
+
+          if (proximityKeywords) {
+              const words = proximityKeywords.match(/"[^"]+"|\S+/g);
+              if (words && words.length === 2) {
+                  // MODIFIED: Changed AROUND(5) to AROUND(15)
+                  queryParts.push(`(${words[0]} AROUND(15) ${words[1]})`);
+              } else if (words && words.length > 0) {
+                  showMessage("AROUND operator requires exactly two words or phrases.", "bg-yellow-100 text-yellow-700");
+              }
+          }
+
+          if (headlineAboutKeywords) {
+              queryParts.push(`(intitle:"${headlineAboutKeywords}" OR intext:"${headlineAboutKeywords}")`);
+          }
+
+          let finalQuery = queryParts.filter(part => part.length > 0).join(' AND ');
+
+          if (excludeKeywords.length > 0) {
+              let excludeString = excludeKeywords.map(k => `-${k.replace(/"/g, '')}`).join(' ');
+              finalQuery += ` ${excludeString}`;
+          }
+
+          document.getElementById('outputString').value = finalQuery.trim();
+      };
+
+      // Function to open the Xing search in a new browser tab
+      window.openInXing = () => {
+          const skillsOrInput = document.getElementById('xingSkills').value.trim();
+          const keywordsAndInput = document.getElementById('xingKeywordsAnd').value.trim();
+          const locationInput = document.getElementById('xingLocation').value.trim();
+          
+          if (!skillsOrInput && !keywordsAndInput && !locationInput) {
+              showMessage("Please enter at least one keyword or location.", "bg-yellow-100 text-yellow-700");
+              return;
+          }
+
+          let queryParts = [];
+
+          if (skillsOrInput) {
+              const skillsOrArray = skillsOrInput.split(',').map(s => s.trim()).filter(s => s.length > 0);
+              const formattedSkillsOr = skillsOrArray.map(s => `"${s}"`).join(' OR ');
+              queryParts.push(`(${formattedSkillsOr})`);
+          }
+
+          if (keywordsAndInput) {
+              const keywordsAndArray = keywordsAndInput.split(',').map(k => k.trim()).filter(k => k.length > 0);
+              const formattedKeywordsAnd = keywordsAndArray.map(k => k.includes(' ') ? `"${k}"` : k).join(' AND ');
+              queryParts.push(`(${formattedKeywordsAnd})`);
+          }
+          
+          if (locationInput) {
+              queryParts.push(`("${locationInput}")`);
+          }
+          
+          const query = queryParts.join(' AND ');
+          const encodedQuery = encodeURIComponent(query);
+          const url = `https://www.google.com/search?q=site:xing.com/profile/ ${encodedQuery}`;
+          window.open(url, '_blank');
+      };
+      
+      // REMOVED: window.openInPeerlist
+      // REMOVED: window.openInAboutMe
+      // REMOVED: window.openInForem
+
+      // Function to open Medium search in a new browser tab
+      window.openInMedium = () => {
+          const topicInput = document.getElementById('mediumTopic').value.trim();
+          const locationInput = document.getElementById('mediumLocation').value.trim();
+          const nameInput = document.getElementById('mediumName').value.trim();
+
+          if (!topicInput && !locationInput && !nameInput) {
+              showMessage("Please enter at least one value for your search.", "bg-yellow-100 text-yellow-700");
+              return;
+          }
+
+          let query = 'site:medium.com';
+          let queryParts = [];
+
+          if (topicInput) {
+              const topicArray = topicInput.split(',').map(t => t.trim()).filter(t => t.length > 0);
+              queryParts.push(...topicArray);
+          }
+          
+          if (locationInput) {
+              queryParts.push(locationInput);
+          }
+
+          if (nameInput) {
+              queryParts.push(nameInput);
+          }
+          
+          query += ' ' + queryParts.join(' ');
+          const encodedQuery = encodeURIComponent(query);
+          const url = `https://www.google.com/search?q=${encodedQuery}`;
+          window.open(url, '_blank');
+      };
+      
+      // Function to open the Crunchbase search in a new browser tab
+      window.openInCrunchbase = () => {
+          const companyName = document.getElementById('crunchbaseCompany').value.trim();
+
+          if (!companyName) {
+              showMessage("Please enter a company name.", "bg-yellow-100 text-yellow-700");
+              return;
+          }
+          
+          const formattedCompanyName = companyName.toLowerCase().replace(/\s/g, '-');
+          const url = `https://www.crunchbase.com/organization/${encodeURIComponent(formattedCompanyName)}#people`;
+          window.open(url, '_blank');
+      };
+      
+      // New function for Crunchbase Advanced Search
+      window.openCrunchbaseAdvancedSearch = () => {
+          const url = `https://www.crunchbase.com/discover/organization.companies`;
+          window.open(url, '_blank');
+          showMessage("Opening Crunchbase Advanced Search...", "bg-gray-200 text-gray-700");
+      };
+      
+      // Function to open the Zoominfo search in a new browser tab
+      window.openInZoominfo = () => {
+          const jobTitle = document.getElementById('zoominfoJobTitle').value;
+
+          if (!jobTitle) {
+              showMessage("Please select a job title.", "bg-yellow-100 text-yellow-700");
+              return;
+          }
+          
+          const url = `https://www.zoominfo.com/people-search/location-usa-industry-software-security-title-${jobTitle}`;
+          window.open(url, '_blank');
+      };
+
+      // Function to open an Instagram search in a new browser tab
+      window.openInInstagram = () => {
+          const skillsInput = document.getElementById('instagramSkills').value.trim();
+          const locationInput = document.getElementById('instagramLocation').value.trim();
+          
+          if (!skillsInput && !locationInput) {
+              showMessage("Please enter at least one keyword for skills or a location.", "bg-yellow-100 text-yellow-700");
+              return;
+          }
+
+          let queryParts = [];
+          if (skillsInput) {
+              const skillsArray = skillsInput.split(',').map(s => s.trim()).filter(s => s.length > 0);
+              const formattedSkills = skillsArray.map(s => `"${s}"`).join(' ');
+              queryParts.push(formattedSkills);
+          }
+          if (locationInput) {
+              queryParts.push(`"${locationInput}"`);
+          }
+
+          const query = `site:instagram.com -inurl:tags -inurl:p/ ${queryParts.join(' ')}`;
+          const encodedQuery = encodeURIComponent(query);
+          const url = `https://www.google.com/search?q=${encodedQuery}`;
+          window.open(url, '_blank');
+      };
+      
+      // Function to open an x.com search in a new browser tab
+      window.openInXcom = () => {
+          const skillsInput = document.getElementById('xcomSkills').value.trim();
+          const locationInput = document.getElementById('xcomLocation').value.trim();
+          
+          if (!skillsInput && !locationInput) {
+              showMessage("Please enter at least one keyword for skills or a location.", "bg-yellow-100 text-yellow-700");
+              return;
+          }
+
+          let queryParts = [];
+          if (skillsInput) {
+              const skillsArray = skillsInput.split(',').map(s => s.trim()).filter(s => s.length > 0);
+              const formattedSkills = skillsArray.map(s => `"${s}"`).join(' ');
+              queryParts.push(formattedSkills);
+          }
+          if (locationInput) {
+              queryParts.push(`"${locationInput}"`);
+          }
+
+          const query = `site:x.com ${queryParts.join(' ')}`;
+          const encodedQuery = encodeURIComponent(query);
+          const url = `https://www.google.com/search?q=${encodedQuery}`;
+          window.open(url, '_blank');
+      };
+
+    </script>
+</head>
+<body class="bg-okta-dark text-gray-200 font-sans p-4 sm:p-8">
+    <div class="max-w-4xl mx-auto bg-gray-800 rounded-xl shadow-lg p-6 sm:p-10 border border-gray-700">
+        <h1 class="text-2xl sm:text-3xl font-bold mb-2">LeadSync by <a href="https://www.linkedin.com/in/martinfreeman/" target="_blank" class="text-okta-blue hover:underline">Martin Freeman</a></h1>
+        <p class="text-gray-400 mb-6">The Manual Boolean Query Generator.</p>
+
+        <div class="space-y-6">
+            
+            <!-- Main Search Selector -->
+            <div class="bg-gray-700 p-5 rounded-xl border border-gray-600 shadow-inner">
+                <label for="searchSelector" class="block text-lg font-semibold text-white mb-3">Select a site to search:</label>
+                <select id="searchSelector" class="w-full rounded-md border-gray-600 shadow-sm focus:border-okta-blue focus:ring-okta-blue p-2 text-gray-900 bg-gray-200">
+                    <option value="" selected disabled>-- Please Select --</option>
+                    <optgroup label="General">
+                        <option value="googleVsLinkedInSection">Google Search vs LinkedIn search - Why?</option>
+                        <option value="linkedinInstructionsSection">LinkedIn Search Instructions</option>
+                        <option value="linkedinSearchSection">LinkedIn (General)</option>
+                        <option value="bulkSearchBuilderSection">Bulk Profile Builder (General)</option>
+                        <option value="xraySearchSection">X-Ray Search (General)</option>
+                        <!-- REMOVED: aboutmeSearchSection -->
+                    </optgroup>
+                    <optgroup label="Social">
+                        <option value="instagramSearchSection">Instagram (Social)</option>
+                        <option value="xcomSearchSection">X.com (Social)</option>
+                    </optgroup>
+                    <optgroup label="Tech">
+                        <option value="githubSearchSection">GitHub (Tech)</option>
+                        <option value="githubioSearchSection">Github.io (Tech)</option>
+                        <option value="stackoverflowSearchSection">Stackoverflow (Tech)</option>
+                        <!-- REMOVED: peerlistSearchSection -->
+                        <option value="kaggleSearchSection">Kaggle.com (Tech)</option>
+                        <!-- REMOVED: foremSearchSection -->
+                    </optgroup>
+                    <optgroup label="Design">
+                        <option value="dribbbleSearchSection">Dribbble (Design)</option>
+                        <option value="behanceSearchSection">Behance (Design)</option>
+                    </optgroup>
+                    <optgroup label="German-speaking">
+                        <option value="xingSearchSection">Xing.com (German-speaking)</option>
+                    </optgroup>
+                    <optgroup label="Exec">
+                        <option value="crunchbaseSearchSection">Crunchbase (Exec)</option>
+                        <option value="zoominfoSearchSection">Zoominfo (Exec)</option>
+                    </optgroup>
+                    <optgroup label="Blog">
+                        <option value="mediumSearchSection">Medium.com (Blog)</option>
+                    </optgroup>
+                    <optgroup label="Q&A">
+                        <option value="quoraSearchSection">Quora.com (Q&A)</option>
+                        <option value="redditSearchSection">Reddit.com (Q&A)</option>
+                    </optgroup>
+                </select>
+            </div>
+            
+            <!-- Bulk Profile Builder (General) -->
+            <div id="bulkSearchBuilderSection" class="hidden">
+                <div class="max-w-3xl mx-auto container-card rounded-xl p-6 sm:p-8 text-gray-100 bg-gray-700/50">
+                    <h1 class="text-2xl font-bold mb-2 text-okta-blue">Bulk Profile Builder (General)</h1>
+                    <p class="text-gray-400 mb-6">Generate ready-to-use search URLs in bulk, refined by job requirements.</p>
+
+                    <div class="space-y-6">
+                        
+                        <!-- 1. Primary Input - UPDATED TEXT -->
+                        <div class="bg-gray-700 p-4 rounded-xl">
+                            <h3 class="text-lg font-semibold text-white mb-2">1. Paste Data (Full Name Only)</h3>
+                            <p class="text-sm text-gray-400 mb-2">Enter **Full Names Only** (one per line). The tool will attempt to clean up usernames from pasted URLs if needed.</p>
+                            <textarea id="inputData" rows="6" placeholder="Jane Doe&#10;John Smith&#10;Alice Johnson" class="w-full text-sm"></textarea>
+                        </div>
+
+                        <!-- 2. Search Scope & Refinements -->
+                        <div class="bg-gray-700 p-4 rounded-xl space-y-4">
+                            <h3 class="text-lg font-semibold text-white mb-3">2. Refinements & Output Scope</h3>
+                            
+                            <!-- Search Engine Selector -->
+                            <div>
+                                <label for="searchEngine" class="block text-sm font-medium mb-1">Search Engine/Platform:</label>
+                                <select id="searchEngine" class="w-full">
+                                    <option value="google" selected>Google (X-Ray Site Search on LinkedIn)</option>
+                                    <option value="linkedin">LinkedIn (Direct Internal Search)</option>
+                                </select>
+                            </div>
+
+                            <!-- Optional Refinement Filters -->
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <div>
+                                    <label for="locationFilter" class="block text-sm font-medium mb-1">Location (Exact Phrase):</label>
+                                    <input type="text" id="locationFilter" placeholder="e.g., 'San Francisco'" class="w-full">
+                                </div>
+                                <div>
+                                    <label for="jobTitleFilter" class="block text-sm font-medium mb-1">Job Title (OR Logic, comma sep.):</label>
+                                    <input type="text" id="jobTitleFilter" placeholder="e.g., engineer, developer" class="w-full">
+                                </div>
+                                <div>
+                                    <label for="companyFilter" class="block text-sm font-medium mb-1">Company (OR Logic, comma sep.):</label>
+                                    <input type="text" id="companyFilter" placeholder="e.g., 'Google' OR 'Microsoft'" class="w-full">
+                                </div>
+                                <div>
+                                    <label for="skillsFilter" class="block text-sm font-medium mb-1">Skills (OR Logic, comma sep.):</label>
+                                    <input type="text" id="skillsFilter" placeholder="e.g., kubernetes, python, 'react native'" class="w-full">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 3. Actions -->
+                        <div class="flex flex-col sm:flex-row gap-4">
+                            <button onclick="window.generateUrls()" class="flex-1 btn-primary text-white font-bold py-3 px-6 rounded-lg shadow-md transition duration-200">
+                                Generate URLs
+                            </button>
+                        </div>
+
+                        <!-- 4. Output -->
+                        <div class="bg-gray-700 p-4 rounded-xl">
+                            <h3 class="text-lg font-semibold text-white mb-2">3. Generated URLs</h3>
+                            <textarea id="outputUrls" rows="8" readonly placeholder="Generated URLs will appear here..." class="w-full text-sm"></textarea>
+                        </div>
+
+                        <!-- 5. Execution Buttons -->
+                        <div class="flex flex-col sm:flex-row gap-4">
+                            <button onclick="window.copyUrls()" class="flex-1 btn-secondary text-white font-bold py-3 px-6 rounded-lg shadow-md transition duration-200">
+                                Copy All URLs
+                            </button>
+                            <button onclick="window.openInBulk()" class="flex-1 btn-primary text-white font-bold py-3 px-6 rounded-lg shadow-md transition duration-200">
+                                Bulk Open Links in Tabs (2.5s Delay)
+                            </button>
+                        </div>
+                        
+                        <!-- Clear Button (Specific to Bulk Builder) -->
+                        <div class="mt-6">
+                            <button onclick="window.clearBulkSearchFields()" class="w-full bg-red-500 text-white font-bold py-3 px-6 rounded-lg shadow-md hover:bg-red-600 transition duration-200">
+                                Clear All Fields
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Google vs LinkedIn Info Page -->
+            <div id="googleVsLinkedInSection" class="bg-gray-700 p-5 rounded-xl border border-gray-600 shadow-inner hidden">
+                <h2 class="text-2xl font-bold text-white mb-4">How Google Search and LinkedIn Search Differ – and Why You Should Use Both</h2>
+                <div class="space-y-6">
+                    <div>
+                        <h3 class="text-xl font-semibold text-white mb-2">Google Search on LinkedIn</h3>
+                        <ul class="list-disc list-inside space-y-1 text-gray-300 ml-4">
+                            <li>Searches the public-facing parts of LinkedIn plus results from other sites.</li>
+                            <li>Lets you use advanced Google operators (AND, OR, site:, intitle:, etc.) for precise searches.</li>
+                            <li>Surfaces profiles and mentions outside LinkedIn (e.g. GitHub, portfolios, blogs).</li>
+                        </ul>
+                        <h4 class="text-lg font-medium text-white mt-4 mb-1">Why use it</h4>
+                        <ul class="list-disc list-inside space-y-1 text-gray-300 ml-4">
+                            <li>Free, no subscription limits.</li>
+                            <li>Can reach people LinkedIn’s own search may not show.</li>
+                            <li>Helps build a broader view of talent, not just within LinkedIn.</li>
+                            <li>Flexible for creative sourcing.</li>
+                        </ul>
+                    </div>
+                    <hr class="border-gray-600">
+                    <div>
+                        <h3 class="text-xl font-semibold text-white mb-2">LinkedIn’s Internal Search</h3>
+                        <ul class="list-disc list-inside space-y-1 text-gray-300 ml-4">
+                            <li>Searches across the full LinkedIn database.</li>
+                            <li>Offers built-in filters (location, company, industry, seniority, etc.).</li>
+                            <li>Best when you need structured, platform-specific results.</li>
+                            </ul>
+                        <h4 class="text-lg font-medium text-white mt-4 mb-1">Why use it</h4>
+                        <ul class="list-disc list-inside space-y-1 text-gray-300 ml-4">
+                            <li>Access to the most complete LinkedIn profiles.</li>
+                            <li>Fast and easy to narrow down with filters.</li>
+                            <li>Designed for recruiter workflows.</li>
+                        </ul>
+                    </div>
+                    <hr class="border-gray-600">
+                    <div>
+                        <h3 class="text-xl font-semibold text-white mb-2">Takeaway</h3>
+                        <ul class="list-disc list-inside space-y-1 text-gray-300 ml-4">
+                            <li>**Google** is best for reach, flexibility, and going beyond LinkedIn.</li>
+                            <li>**LinkedIn** is best for structured filters and depth inside the platform.</li>
+                            <li>The strongest sourcing strategies use both together.</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+            <!-- LinkedIn Instructions Page -->
+            <div id="linkedinInstructionsSection" class="bg-gray-700 p-5 rounded-xl border border-gray-600 shadow-inner hidden">
+                <h2 class="text-2xl font-bold text-white mb-4">LinkedIn Search Instructions</h2>
+                <div class="space-y-6 text-gray-300">
+                    <div>
+                        <h3 class="text-xl font-semibold text-white mb-2">How to Use the Basic Search Fields</h3>
+                        <p>The tool generates a single, combined search string as you fill in the fields. You can test your query at any time by pressing the **Generate Query** button.</p>
+                        <ul class="list-disc list-inside space-y-1 mt-4 ml-4">
+                            <li>**Country-Specific LinkedIn Domain**: The search starts by selecting a LinkedIn domain. This is your foundation. The tool automatically adds the necessary `site:` operators to search only within that country's LinkedIn pages, **using only the current `/in` profile path.**</li>
+                            <li>**Town/City (Optional)**: This field lets you narrow your search to a specific city or town. The tool will add this as an `AND` operator to your query.</li>
+                            <li>**Okta Hub Locations**: You can select multiple Okta hub locations from this dropdown menu. The tool combines these locations with `OR` operators.</li>
+                            <li>**Companies (<span class="font-bold">inanchor: | OR</span>)**: Enter a list of companies. Use the selector to choose between the **`inanchor:`** operator (targets profile links) or a standard **`OR`** text search.</li>
+                            <li>**Job Titles (<span class="font-bold">intitle: | OR</span>)**: Enter job titles. Use the selector to choose between the **`intitle:`** operator (targets headlines) or a standard **`OR`** text search.</li>
+                            <li>**Keywords & Phrases**: These sections let you add various keywords and skills to your search string. The tool automatically combines them using `OR` or `AND` as indicated by the labels.</li>
+                            <li>**Exclusions (-)**: Use this section to exclude unwanted keywords from your search results. Each keyword will be added with a `-` (minus) operator.</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Google Advanced Operators Section -->
+            <div id="googleAdvancedOperatorsSection" class="bg-gray-700 p-5 rounded-xl border border-gray-600 shadow-inner hidden">
+                <h2 class="text-lg font-semibold text-white mb-3">Google Advanced Search Operators (General)</h2>
+                <p class="text-sm text-gray-300 mb-4">
+                    Below is a quick reference guide for building powerful Google search queries. For more details on these operators, check out this video:
+                    <a href="https://www.youtube.com/watch?v=Txd428VEoFs&t=165s" target="_blank" class="text-okta-blue hover:underline">More on Boolean Operators</a>
+                </p>
+                <div class="space-y-4">
+                    <div>
+                        <p class="font-semibold text-white">"search term"</p>
+                        <p class="text-sm text-gray-300 ml-4">Finds an exact match of a word or phrase. <span class="font-semibold">Example:</span> `"digital marketing strategy"`</p>
+                    </div>
+                    <div>
+                        <p class="font-semibold text-white">OR</p>
+                        <p class="text-sm text-gray-300 ml-4">Searches for either of two terms (inclusive). <span class="font-semibold">Example:</span> `marketing OR advertising`</p>
+                    </div>
+                    <div>
+                        <p class="font-semibold text-white">AND</p>
+                        <p class="text-sm text-gray-300 ml-4">Requires both terms to appear in the results. <span class="font-semibold">Example:</span> `SEO AND analytics`</p>
+                    </div>
+                    <div>
+                        <p class="font-semibold text-white">-</p>
+                        <p class="text-sm text-gray-300 ml-4">Excludes words or phrases from the results. <span class="font-semibold">Example:</span> `apple -fruit`</p>
+                    </div>
+                    <div>
+                        <p class="font-semibold text-white">*</p>
+                        <p class="text-sm text-gray-300 ml-4">A wildcard that matches any word or phrase. <span class="font-semibold">Example:</span> `"best * tools"`</p>
+                    </div>
+                    <div>
+                        <p class="font-semibold text-white">( )</p>
+                        <p class="text-sm text-gray-300 ml-4">Groups multiple operators or terms to control logic. <span class="font-semibold">Example:</span> `(SEO OR PPC) AND analytics`</p>
+                    </div>
+                    <div>
+                        <p class="font-semibold text-white">+</p>
+                        <p class="text-sm text-gray-300 ml-4">Forces the inclusion of a specific word, even if it’s a common word Google would normally ignore. <span class="font-semibold">Example:</span> `linkedin +bengaluru`</p>
+                    </div>
+                    <div>
+                        <p class="font-semibold text-white">define:</p>
+                        <p class="text-sm text-gray-300 ml-4">Shows Google’s dictionary definition. <span class="font-semibold">Example:</span> `define:ontology`</p>
+                    </div>
+                    <div>
+                        <p class="font-semibold text-white">filetype:</p>
+                        <p class="text-sm text-gray-300 ml-4">Limits results to a specific file format. <span class="font-semibold">Example:</span> `marketing plan filetype:pdf`</p>
+                    </div>
+                    <div>
+                        <p class="font-semibold text-white">site:</p>
+                        <p class="text-sm text-gray-300 ml-4">Limits results to a specific website or domain. <span class="font-semibold">Example:</span> `site:linkedin.com "growth hacker"`</p>
+                    </div>
+                    <div>
+                        <p class="font-semibold text-white">related:</p>
+                        <p class="text-sm text-gray-300 ml-4">Finds websites similar to a given site. <span class="font-semibold">Example:</span> `related:hubspot.com`</p>
+                    </div>
+                    <div>
+                        <p class="font-semibold text-white">intitle:</p>
+                        <p class="text-sm text-gray-300 ml-4">Finds pages with a specific word in the title. <span class="font-semibold">Example:</span> `intitle:"case study"`</p>
+                    </div>
+                    <div>
+                        <p class="font-semibold text-white">allintitle:</p>
+                        <p class="text-sm text-gray-300 ml-4">Finds pages with all specified words in the title. <span class="font-semibold">Example:</span> `allintitle:SEO audit checklist`</p>
+                    </div>
+                    <div>
+                        <p class="font-semibold text-white">inurl:</p>
+                        <p class="text-sm text-gray-300 ml-4">Finds pages with a word in the URL. <span class="font-semibold">Example:</span> `inurl:resume "developer"`</p>
+                    </div>
+                    <div>
+                        <p class="font-semibold text-white">allinurl:</p>
+                        <p class="text-sm text-gray-300 ml-4">Finds pages with all specified words in the URL. <span class="font-semibold">Example:</span> `allinurl:research PDF`</p>
+                    </div>
+                    <div>
+                        <p class="font-semibold text-white">intext:</p>
+                        <p class="text-sm text-gray-300 ml-4">Finds pages containing a specific word in the body text. <span class="font-semibold">Example:</span> `intext:"customer journey"`</p>
+                    </div>
+                    <div>
+                        <p class="font-semibold text-white">allintext:</p>
+                        <p class="text-sm text-gray-300 ml-4">Finds pages containing all specified words in the body text. <span class="font-semibold">Example:</span> `allintext:content strategy SEO`</p>
+                    </div>
+                    <div>
+                        <p class="font-semibold text-white">AROUND(X)</p>
+                        <p class="text-sm text-gray-300 ml-4">Finds words that are within X words of each other. <span class="font-semibold">Example:</span> `"machine" AROUND(5) "learning"`</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Quora Search Section -->
+            <div id="quoraSearchSection" class="bg-gray-700 p-5 rounded-xl border border-gray-600 shadow-inner hidden">
+                <h2 class="text-lg font-semibold text-white mb-3">Quora.com (Q&A)</h2>
+                <p class="text-sm text-gray-300 mb-4">Search Quora for questions and answers by topic.</p>
+                <div class="grid grid-cols-1 gap-4">
+                    <div>
+                        <label for="quoraKeyword" class="block text-sm font-medium text-gray-200 mb-1">Keyword:</label>
+                        <input type="text" id="quoraKeyword" placeholder="e.g., identity and access management" class="w-full rounded-md border-gray-600 shadow-sm focus:border-okta-blue focus:ring-okta-blue p-2 text-gray-900 bg-gray-200">
+                    </div>
+                </div>
+                <div class="mt-4">
+                    <button onclick="window.openInQuora()" class="w-full bg-okta-blue text-white font-bold py-3 px-6 rounded-lg shadow-md hover:bg-okta-blue/80 transition duration-200">
+                        Open in Google
+                    </button>
+                </div>
+            </div>
+          
+            <!-- Reddit Search Section -->
+            <div id="redditSearchSection" class="bg-gray-700 p-5 rounded-xl border border-gray-600 shadow-inner hidden">
+                <h2 class="text-lg font-semibold text-white mb-3">Reddit.com (Q&A)</h2>
+                <p class="text-sm text-gray-300 mb-4">Search Reddit for questions and answers by topic.</p>
+                <div class="grid grid-cols-1 gap-4">
+                    <div>
+                        <label for="redditKeyword" class="block text-sm font-medium text-gray-200 mb-1">Keyword:</label>
+                        <input type="text" id="redditKeyword" placeholder="e.g., identity and access management" class="w-full rounded-md border-gray-600 shadow-sm focus:border-okta-blue focus:ring-okta-blue p-2 text-gray-900 bg-gray-200">
+                    </div>
+                </div>
+                <div class="mt-4">
+                    <button onclick="window.openInReddit()" class="w-full bg-okta-blue text-white font-bold py-3 px-6 rounded-lg shadow-md hover:bg-okta-blue/80 transition duration-200">
+                        Open in Google
+                    </button>
+                </div>
+            </div>
+
+            <!-- REMOVED: Forem.com Search Section -->
+
+            <!-- Crunchbase Search Section -->
+            <div id="crunchbaseSearchSection" class="bg-gray-700 p-5 rounded-xl border border-gray-600 shadow-inner hidden">
+                <h2 class="text-lg font-semibold text-white mb-3">Crunchbase Search</h2>
+                <p class="text-sm text-gray-300 mb-4">Find key people and contacts for a company on Crunchbase.</p>
+                <div>
+                    <label for="crunchbaseCompany" class="block text-sm font-medium text-gray-200 mb-1">Company Name:</label>
+                    <input type="text" id="crunchbaseCompany" placeholder="e.g., Crowdstrike" class="w-full rounded-md border-gray-600 shadow-sm focus:border-okta-blue focus:ring-okta-blue p-2 text-gray-900 bg-gray-200">
+                </div>
+                <div class="mt-4 flex flex-col sm:flex-row gap-4">
+                    <button onclick="window.openInCrunchbase()" class="flex-1 bg-okta-blue text-white font-bold py-3 px-6 rounded-lg shadow-md hover:bg-okta-blue/80 transition duration-200">
+                        Open in Crunchbase
+                    </button>
+                    <button onclick="window.openCrunchbaseAdvancedSearch()" class="flex-1 bg-gray-600 text-white font-bold py-3 px-6 rounded-lg shadow-md hover:bg-gray-500 transition duration-200">
+                        Company Advanced Search in Crunchbase
+                    </button>
+                </div>
+            </div>
+
+            <!-- Zoominfo Search Section -->
+            <div id="zoominfoSearchSection" class="bg-gray-700 p-5 rounded-xl border border-gray-600 shadow-inner hidden">
+                <h2 class="text-lg font-semibold text-white mb-3">Zoominfo Search</h2>
+                <p class="text-sm text-gray-300 mb-4">Search for professionals by job title in the US software security industry.</p>
+                <div>
+                    <label for="zoominfoJobTitle" class="block text-sm font-medium text-gray-200 mb-1">Job Title:</label>
+                    <select id="zoominfoJobTitle" class="w-full rounded-md border-gray-600 shadow-sm focus:border-okta-blue focus:ring-okta-blue p-2 text-gray-900 bg-gray-200">
+                        <option value="">Select a title</option>
+                        <option value="ceo">CEO</option>
+                        <option value="cio">CIO</option>
+                        <option value="director">Director</option>
+                        <option value="engineer">Engineer</option>
+                        <option value="manager">Manager</option>
+                        <option value="sales">Sales</option>
+                        <option value="vice-president">Vice President</option>
+                    </select>
+                </div>
+                <div class="mt-4">
+                    <button onclick="window.openInZoominfo()" class="w-full bg-okta-blue text-white font-bold py-3 px-6 rounded-lg shadow-md hover:bg-okta-blue/80 transition duration-200">
+                        Open In Zoominfo
+                    </button>
+                </div>
+            </div>
+
+
+            <!-- GitHub Advanced Search Section -->
+            <div id="githubSearchSection" class="bg-gray-700 p-5 rounded-xl border border-gray-600 shadow-inner hidden">
+                <h2 class="text-2xl font-bold text-white mb-4">GitHub Search (Users & Content)</h2>
+                
+                <!-- Primary User Search -->
+                <h3 class="text-lg font-semibold text-white mb-3 pt-2 border-t border-gray-600">Advanced User Profile Search (Users only)</h3>
+                <p class="text-sm text-gray-300 mb-2">Use these fields to search GitHub **user profiles** using specific operators.</p>
+                <p class="text-xs text-yellow-300 mb-4 font-medium">
+                    ⚠️ **Combination Rules:** You can combine **1&3** and **2&3**. Field **4** (Full Name) is a standalone parameter.
+                </p>
+                <!-- Aligned Inputs for User Search -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="input-column">
+                        <div>
+                            <label for="gitHubLanguage" class="block text-sm font-medium text-gray-200 mb-1">1. Working in this **Language** (`language:`):</label>
+                            <input type="text" id="gitHubLanguage" placeholder="e.g., python" class="w-full rounded-md border-gray-600 shadow-sm focus:border-okta-blue focus:ring-okta-blue p-2 text-gray-900 bg-gray-200">
+                        </div>
+                        <div>
+                            <label for="gitHubSkill" class="block text-sm font-medium text-gray-200 mb-1">2. **Skill/Topic**:</label>
+                            <input type="text" id="gitHubSkill" placeholder="e.g., kubernetes" class="w-full rounded-md border-gray-600 shadow-sm focus:border-okta-blue focus:ring-okta-blue p-2 text-gray-900 bg-gray-200">
+                        </div>
+                    </div>
+                    <div class="input-column">
+                        <div>
+                            <label for="gitHubLocation" class="block text-sm font-medium text-gray-200 mb-1">3. From this **Location** (`location:`):</label>
+                            <input type="text" id="gitHubLocation" placeholder="e.g., 'San Francisco'" class="w-full rounded-md border-gray-600 shadow-sm focus:border-okta-blue focus:ring-okta-blue p-2 text-gray-900 bg-gray-200">
+                        </div>
+                        <div>
+                            <label for="gitHubFullName" class="block text-sm font-medium text-gray-200 mb-1">4. With this **Full Name** (`fullname:`):</label>
+                            <input type="text" id="gitHubFullName" placeholder="e.g., 'John Smith'" class="w-full rounded-md border-gray-600 shadow-sm focus:border-okta-blue focus:ring-okta-blue p-2 text-gray-900 bg-gray-200">
+                        </div>
+                    </div>
+                </div>
+                <div class="mt-4">
+                    <button onclick="window.openInGitHub()" class="w-full bg-okta-blue text-white font-bold py-3 px-6 rounded-lg shadow-md hover:bg-okta-blue/80 transition duration-200">
+                        Open User Search in GitHub
+                    </button>
+                </div>
+                
+                <!-- Read Me X-Ray Search -->
+                <h3 class="text-lg font-semibold text-white mb-3 pt-6 border-t border-gray-600">Read Me X-Ray Search (Google Site Operator)</h3>
+                <p class="text-sm text-gray-300 mb-4">This uses Google's **defensive terms** (`"following" ("block" OR "report")`) to help filter out noise and recruiters while targeting GitHub profile information.</p>
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div>
+                        <label for="gitHubReadMeKeyword" class="block text-sm font-medium text-gray-200 mb-1">Keyword/Skills (OR):</label>
+                        <input type="text" id="gitHubReadMeKeyword" placeholder="e.g., 'java' OR 'python'" class="w-full rounded-md border-gray-600 shadow-sm focus:border-okta-blue focus:ring-okta-blue p-2 text-gray-900 bg-gray-200">
+                    </div>
+                    <div>
+                        <label for="gitHubReadMeLanguage" class="block text-sm font-medium text-gray-200 mb-1">Language:</label>
+                        <input type="text" id="gitHubReadMeLanguage" placeholder="e.g., 'JavaScript'" class="w-full rounded-md border-gray-600 shadow-sm focus:border-okta-blue focus:ring-okta-blue p-2 text-gray-900 bg-gray-200">
+                    </div>
+                    <div>
+                        <label for="gitHubReadMeLocation" class="block text-sm font-medium text-gray-200 mb-1">Location:</label>
+                        <input type="text" id="gitHubReadMeLocation" placeholder="e.g., 'San Francisco'" class="w-full rounded-md border-gray-600 shadow-sm focus:border-okta-blue focus:ring-okta-blue p-2 text-gray-900 bg-gray-200">
+                    </div>
+                </div>
+                <div class="mt-4">
+                    <button onclick="window.openInGitHubReadMe()" class="w-full bg-gray-600 text-white font-bold py-3 px-6 rounded-lg shadow-md hover:bg-gray-500 transition duration-200">
+                        Open Read Me X-Ray Search
+                    </button>
+                </div>
+
+                <!-- GitHub General Search Section -->
+                <div class="mt-6 pt-6 border-t border-gray-600">
+                    <h3 class="text-lg font-semibold text-white mb-2">General Keyword Search</h3>
+                    <p class="text-sm text-gray-300 mb-4">Search for a simple keyword across different GitHub resource types.</p>
+                    
+                    <div class="flex flex-col sm:flex-row gap-4">
+                        <div class="sm:w-1/3">
+                            <label for="gitHubGeneralSearchType" class="block text-sm font-medium text-gray-200 mb-1">Search Type:</label>
+                            <select id="gitHubGeneralSearchType" class="w-full rounded-md border-gray-600 shadow-sm focus:border-okta-blue focus:ring-okta-blue p-2 text-gray-900 bg-gray-200">
+                                <option value="users" selected>Users</option>
+                                <option value="repositories">Repositories</option>
+                                <option value="topics">Topics</option>
+                                <option value="discussions">Discussions</option>
+                                <option value="wikis">Wikis</option>
+                            </select>
+                        </div>
+                        <div class="sm:flex-1">
+                            <label for="gitHubGeneralKeyword" class="block text-sm font-medium text-gray-200 mb-1">Keyword:</label>
+                            <input type="text" id="gitHubGeneralKeyword" placeholder="e.g., kubernetes, security, or OWASP" class="w-full rounded-md border-gray-600 shadow-sm focus:border-okta-blue focus:ring-okta-blue p-2 text-gray-900 bg-gray-200">
+                        </div>
+                    </div>
+                    
+                    <div class="mt-4">
+                        <button onclick="window.openInGitHubGeneralSearch()" class="w-full bg-gray-600 text-white font-bold py-3 px-6 rounded-lg shadow-md hover:bg-gray-500 transition duration-200">
+                            Perform General Search
+                        </button>
+                    </div>
+                </div>
+            </div>
+          
+            <!-- Stackoverflow Advanced Search Section -->
+            <div id="stackoverflowSearchSection" class="bg-gray-700 p-5 rounded-xl border border-gray-600 shadow-inner hidden">
+                <h2 class="text-lg font-semibold text-white mb-3">Stackoverflow Advanced Search</h2>
+                <p class="text-sm text-gray-300 mb-4">Search for users by language and location on Stack Overflow.</p>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                        <label for="stackoverflowLanguage" class="block text-sm font-medium text-gray-200 mb-1">Language:</label>
+                        <input type="text" id="stackoverflowLanguage" placeholder="e.g., python" class="w-full rounded-md border-gray-600 shadow-sm focus:border-okta-blue focus:ring-okta-blue p-2 text-gray-900 bg-gray-200">
+                    </div>
+                    <div>
+                        <label for="stackoverflowLocation" class="block text-sm font-medium text-gray-200 mb-1">Location:</label>
+                        <input type="text" id="stackoverflowLocation" placeholder="e.g., New York" class="w-full rounded-md border-gray-600 shadow-sm focus:border-okta-blue focus:ring-okta-blue p-2 text-gray-900 bg-gray-200">
+                    </div>
+                </div>
+                <div class="mt-4">
+                    <button onclick="window.openInStackOverflow()" class="w-full bg-okta-blue text-white font-bold py-3 px-6 rounded-lg shadow-md hover:bg-okta-blue/80 transition duration-200">
+                        Open in Google
+                    </button>
+                </div>
+            </div>
+
+            <!-- Dribbble Advanced Search Section -->
+            <div id="dribbbleSearchSection" class="bg-gray-700 p-5 rounded-xl border border-gray-600 shadow-inner hidden">
+                <h2 class="text-lg font-semibold text-white mb-3">Dribbble Advanced Search</h2>
+                <p class="text-sm text-gray-300 mb-4">Search for designers by location on Dribbble.</p>
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div>
+                        <label for="dribbbleLocation" class="block text-sm font-medium text-gray-200 mb-1">Location:</label>
+                        <input type="text" id="dribbbleLocation" placeholder="e.g., London" class="w-full rounded-md border-gray-600 shadow-sm focus:border-okta-blue focus:ring-okta-blue p-2 text-gray-900 bg-gray-200">
+                    </div>
+                </div>
+                <div class="mt-4">
+                    <button onclick="window.openInDribbble()" class="w-full bg-okta-blue text-white font-bold py-3 px-6 rounded-lg shadow-md hover:bg-okta-blue/80 transition duration-200">
+                        Open in Dribbble
+                    </button>
+                </div>
+            </div>
+
+            <!-- Behance Advanced Search Section -->
+            <div id="behanceSearchSection" class="bg-gray-700 p-5 rounded-xl border border-gray-600 shadow-inner hidden">
+                <h2 class="text-lg font-semibold text-white mb-3">Behance Advanced Search</h2>
+                <p class="text-sm text-gray-300 mb-4">Search for creative professionals by keywords, creative fields, and location.</p>
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div>
+                        <label for="behanceKeywords" class="block text-sm font-medium text-gray-200 mb-1">Keywords/Skills:</label>
+                        <input type="text" id="behanceKeywords" placeholder="e.g., branding, illustrator" class="w-full rounded-md border-gray-600 shadow-sm focus:border-okta-blue focus:ring-okta-blue p-2 text-gray-900 bg-gray-200">
+                    </div>
+                    <div>
+                        <label for="behanceField" class="block text-sm font-medium text-gray-200 mb-1">Creative Field:</label>
+                        <select id="behanceField" class="w-full rounded-md border-gray-600 shadow-sm focus:border-okta-blue focus:ring-okta-blue p-2 text-gray-900 bg-gray-200">
+                            <option value="">Select Field</option>
+                            <option value="Graphic Design">Graphic Design</option>
+                            <option value="Logo Design">Logo Design</option>
+                            <option value="Stationery Design">Stationery Design</option>
+                            <option value="Fonts & Typography">Fonts & Typography</option>
+                            <option value="Branding Services">Branding Services</option>
+                            <option value="Book Design">Book Design</option>
+                            <option value="Packaging Design">Packaging Design</option>
+                            <option value="Album Cover Design">Album Cover Design</option>
+                            <option value="Signage Design">Signage Design</option>
+                            <option value="Invitation Design">Invitation Design</option>
+                            <option value="T-Shirt & Merchandise">T-Shirt & Merchandise</option>
+                            <option value="Flyer & Brochure Design">Flyer & Brochure Design</option>
+                            <option value="Poster Design">Poster Design</option>
+                            <option value="Identity Design">Identity Design</option>
+                            <option value="Brand Guidelines">Brand Guidelines</option>
+                            <option value="Web & App Design">Web & App Design</option>
+                            <option value="Website Design">Website Design</option>
+                            <option value="App Design">App Design</option>
+                            <option value="UI/UX Design">UI/UX Design</option>
+                            <option value="Landing Page Design">Landing Page Design</option>
+                            <option value="Icon Design">Icon Design</option>
+                            <option value="Drawing & Illustration">Drawing & Illustration</option>
+                            <option value="Illustrations">Illustrations</option>
+                            <option value="Portraits">Portraits</option>
+                            <option value="Comics & Character Design">Comics & Character Design</option>
+                            <option value="Fashion Design">Fashion Design</option>
+                            <option value="Pattern Design">Pattern Design</option>
+                            <option value="Storyboards">Storyboards</option>
+                            <option value="Tattoo Design">Tattoo Design</option>
+                            <option value="NFT Art">NFT Art</option>
+                            <option value="3D Illustration">3D Illustration</option>
+                            <option value="Children's Illustration">Children's Illustration</option>
+                            <option value="Marketing Design">Marketing Design</option>
+                            <option value="Social Media Design">Social Media Design</option>
+                            <option value="Presentation Design">Presentation Design</option>
+                            <option value="Infographic Design">Infographic Design</option>
+                            <option value="Resume Design">Resume Design</option>
+                            <option value="Copywriting">Copywriting</option>
+                            <option value="Photography & Editing">Photography & Editing</option>
+                            <option value="Product Photography">Product Photography</option>
+                            <option value="Landscape Photography">Landscape Photography</option>
+                            <option value="Image Editing & Retouching">Image Editing & Retouching</option>
+                            <option value="Portrait Photography">Portrait Photography</option>
+                            <option value="Architecture & Interior Design">Architecture & Interior Design</option>
+                            <option value="Landscape Design">Landscape Design</option>
+                            <option value="Product & Game Design">Product & Game Design</option>
+                            <option value="Industrial Design">Industrial Design</option>
+                            <option value="Graphics for Streamers">Graphics for Streamers</option>
+                            <option value="Game Design">Game Design</option>
+                            <option value="Career & Learning">Career & Learning</option>
+                            <option value="Creative Tool Coaching">Creative Tool Coaching</option>
+                            <option value="Mentorship & Career Advice">Mentorship & Career Advice</option>
+                            <option value="3D">3D</option>
+                            <option value="Modeling Projects">Modeling Projects</option>
+                            <option value="Architecture Renderings">Architecture Renderings</option>
+                            <option value="Audio & Music">Audio & Music</option>
+                            <option value="Music Composition & Production">Music Composition & Production</option>
+                            <option value="Sound Design">Sound Design</option>
+                            <option value="Animation & Motion Graphics">Animation & Motion Graphics</option>
+                            <option value="Animated Gifs">Animated Gifs</option>
+                            <option value="Logo Animation">Logo Animation</option>
+                            <option value="Motion Graphics">Motion Graphics</option>
+                            <option value="Video Production & Editing">Video Production & Editing</option>
+                            <option value="Explainer Videos">Explainer Videos</option>
+                            <option value="Short Video Ads">Short Video Ads</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="behanceLocation" class="block text-sm font-medium text-gray-200 mb-1">Location:</label>
+                        <input type="text" id="behanceLocation" placeholder="e.g., London" class="w-full rounded-md border-gray-600 shadow-sm focus:border-okta-blue focus:ring-okta-blue p-2 text-gray-900 bg-gray-200">
+                    </div>
+                </div>
+                <div class="mt-4">
+                    <button onclick="window.openInBehance()" class="w-full bg-okta-blue text-white font-bold py-3 px-6 rounded-lg shadow-md hover:bg-okta-blue/80 transition duration-200">
+                        Open in Google
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Xing.com Search Section -->
+            <div id="xingSearchSection" class="bg-gray-700 p-5 rounded-xl border border-gray-600 shadow-inner hidden">
+                <h2 class="text-lg font-semibold text-white mb-3">Xing.com Search</h2>
+                <p class="text-sm text-gray-300 mb-4">Build a targeted search query for Xing.com profiles.</p>
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <div>
+                        <label for="xingSkills" class="block text-sm font-medium text-gray-200 mb-1">Skills (OR):</label>
+                        <input type="text" id="xingSkills" placeholder="e.g., product manager, saas" class="w-full rounded-md border-gray-600 shadow-sm focus:border-okta-blue focus:ring-okta-blue p-2 text-gray-900 bg-gray-200">
+                    </div>
+                    <div>
+                        <label for="xingKeywordsAnd" class="block text-sm font-medium text-gray-200 mb-1">Additional Keywords (AND):</label>
+                        <input type="text" id="xingKeywordsAnd" placeholder="e.g., b2b, tech" class="w-full rounded-md border-gray-600 shadow-sm focus:border-okta-blue focus:ring-okta-blue p-2 text-gray-900 bg-gray-200">
+                    </div>
+                    <div>
+                        <label for="xingLocation" class="block text-sm font-medium text-gray-200 mb-1">Location (AND):</label>
+                        <input type="text" id="xingLocation" placeholder="e.g., Berlin" class="w-full rounded-md border-gray-600 shadow-sm focus:border-okta-blue focus:ring-okta-blue p-2 text-gray-900 bg-gray-200">
+                    </div>
+                </div>
+                <div class="mt-4">
+                    <button onclick="window.openInXing()" class="w-full bg-okta-blue text-white font-bold py-3 px-6 rounded-lg shadow-md hover:bg-okta-blue/80 transition duration-200">
+                        Open in Google
+                    </button>
+                </div>
+            </div>
+
+            <!-- REMOVED: Peerlist.io Search Section -->
+
+            <!-- Medium.com Search Section -->
+            <div id="mediumSearchSection" class="bg-gray-700 p-5 rounded-xl border border-gray-600 shadow-inner hidden">
+                <h2 class="text-lg font-semibold text-white mb-3">Medium.com Search</h2>
+                <p class="text-sm text-gray-300 mb-4">Search for profiles and articles on Medium.com by topic, location, or name.</p>
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div>
+                        <label for="mediumTopic" class="block text-sm font-medium text-gray-200 mb-1">Topic/Skill (separated by commas):</label>
+                        <input type="text" id="mediumTopic" placeholder="e.g., data science, machine learning" class="w-full rounded-md border-gray-600 shadow-sm focus:border-okta-blue focus:ring-okta-blue p-2 text-gray-900 bg-gray-200">
+                    </div>
+                    <div>
+                        <label for="mediumLocation" class="block text-sm font-medium text-gray-200 mb-1">Location (country, city, or town):</label>
+                        <input type="text" id="mediumLocation" placeholder="e.g., San Francisco" class="w-full rounded-md border-gray-600 shadow-sm focus:border-okta-blue focus:ring-okta-blue p-2 text-gray-900 bg-gray-200">
+                    </div>
+                    <div>
+                        <label for="mediumName" class="block text-sm font-medium text-gray-200 mb-1">Name (Optional):</label>
+                        <input type="text" id="mediumName" placeholder="e.g., Jane Doe" class="w-full rounded-md border-gray-600 shadow-sm focus:border-okta-blue focus:ring-okta-blue p-2 text-gray-900 bg-gray-200">
+                    </div>
+                </div>
+                <div class="mt-4">
+                    <button onclick="window.openInMedium()" class="w-full bg-okta-blue text-white font-bold py-3 px-6 rounded-lg shadow-md hover:bg-okta-blue/80 transition duration-200">
+                        Open in Google
+                    </button>
+                </div>
+            </div>
+
+            <!-- Instagram Search Section -->
+            <div id="instagramSearchSection" class="bg-gray-700 p-5 rounded-xl border border-gray-600 shadow-inner hidden">
+                <h2 class="text-lg font-semibold text-white mb-3">Instagram (Social)</h2>
+                <p class="text-sm text-gray-300 mb-4">Build a targeted search query for Instagram profiles.</p>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                        <label for="instagramSkills" class="block text-sm font-medium text-gray-200 mb-1">Skills/Topics (separated by commas):</label>
+                        <input type="text" id="instagramSkills" placeholder="e.g., product design, UX" class="w-full rounded-md border-gray-600 shadow-sm focus:border-okta-blue focus:ring-okta-blue p-2 text-gray-900 bg-gray-200">
+                    </div>
+                    <div>
+                        <label for="instagramLocation" class="block text-sm font-medium text-gray-200 mb-1">Location (country, city, or town):</label>
+                        <input type="text" id="instagramLocation" placeholder="e.g., San Francisco" class="w-full rounded-md border-gray-600 shadow-sm focus:border-okta-blue focus:ring-okta-blue p-2 text-gray-900 bg-gray-200">
+                    </div>
+                </div>
+                <div class="mt-4">
+                    <button onclick="window.openInInstagram()" class="w-full bg-okta-blue text-white font-bold py-3 px-6 rounded-lg shadow-md hover:bg-okta-blue/80 transition duration-200">
+                        Open in Google
+                    </button>
+                </div>
+            </div>
+
+            <!-- x.com Search Section -->
+            <div id="xcomSearchSection" class="bg-gray-700 p-5 rounded-xl border border-gray-600 shadow-inner hidden">
+                <h2 class="text-lg font-semibold text-white mb-3">X.com (Social)</h2>
+                <p class="text-sm text-gray-300 mb-4">Build a targeted search query for x.com profiles.</p>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                        <label for="xcomSkills" class="block text-sm font-medium text-gray-200 mb-1">Skills/Topics (separated by commas):</label>
+                        <input type="text" id="xcomSkills" placeholder="e.g., java developer" class="w-full rounded-md border-gray-600 shadow-sm focus:border-okta-blue focus:ring-okta-blue p-2 text-gray-900 bg-gray-200">
+                    </div>
+                    <div>
+                        <label for="xcomLocation" class="block text-sm font-medium text-gray-200 mb-1">Location (country, city, or town):</label>
+                        <input type="text" id="xcomLocation" placeholder="e.g., poland" class="w-full rounded-md border-gray-600 shadow-sm focus:border-okta-blue focus:ring-okta-blue p-2 text-gray-900 bg-gray-200">
+                    </div>
+                </div>
+                <div class="mt-4">
+                    <button onclick="window.openInXcom()" class="w-full bg-okta-blue text-white font-bold py-3 px-6 rounded-lg shadow-md hover:bg-okta-blue/80 transition duration-200">
+                        Open in Google
+                    </button>
+                </div>
+            </div>
+
+            <!-- X-Ray Search Section -->
+            <div id="xraySearchSection" class="bg-gray-700 p-5 rounded-xl border border-gray-600 shadow-inner hidden">
+                <h2 class="text-lg font-semibold text-white mb-3">X-Ray Search (General)</h2>
+                <p class="text-sm text-gray-300 mb-4">Use this to search for any topic within a specific website domain.</p>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                        <label for="xrayDomain" class="block text-sm font-medium text-gray-200 mb-1">Specific Domain:</label>
+                        <input type="text" id="xrayDomain" placeholder="e.g., meetup.com" class="w-full rounded-md border-gray-600 shadow-sm focus:border-okta-blue focus:ring-okta-blue p-2 text-gray-900 bg-gray-200">
+                    </div>
+                    <div>
+                        <label for="xrayTopic" class="block text-sm font-medium text-gray-200 mb-1">Search Topic:</label>
+                        <input type="text" id="xrayTopic" placeholder="e.g., Kubernetes" class="w-full rounded-md border-gray-600 shadow-sm focus:border-okta-blue focus:ring-okta-blue p-2 text-gray-900 bg-gray-200">
+                    </div>
+                    <div>
+                        <label for="xrayLocation" class="block text-sm font-medium text-gray-200 mb-1">Location:</label>
+                        <input type="text" id="xrayLocation" placeholder="e.g., India" class="w-full rounded-md border-gray-600 shadow-sm focus:border-okta-blue focus:ring-okta-blue p-2 text-gray-900 bg-gray-200">
+                    </div>
+                </div>
+                <div class="mt-4">
+                    <button onclick="window.openXraySearch()" class="w-full bg-okta-blue text-white font-bold py-3 px-6 rounded-lg shadow-md hover:bg-okta-blue/80 transition duration-200">
+                        Open in Google
+                    </button>
+                </div>
+            </div>
+
+            <!-- LinkedIn Search Sections (All grouped under one div) -->
+            <div id="linkedinSearchSection" class="hidden">
+                <!-- Site & Type Section -->
+                <div class="bg-gray-700 p-5 rounded-xl border border-gray-600 shadow-inner">
+                    <h2 class="text-lg font-semibold text-white mb-3">LinkedIn Search Scope</h2>
+                    <p class="text-sm text-gray-300 mb-4">Choose a country-specific domain for your LinkedIn search (using the **`/in`** profile path).</p>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                            <label for="countryOperator" class="block text-sm font-medium text-gray-200 mb-1">Country-Specific LinkedIn Domain:</label>
+                            <select id="countryOperator" class="w-full rounded-md border-gray-600 shadow-sm focus:border-okta-blue focus:ring-okta-blue p-2 text-gray-900 bg-gray-200">
+                                <optgroup label="NORAM (North America)">
+                                    <option value="site:linkedin.com/in">United States/Anywhere</option>
+                                    <option value="site:ca.linkedin.com/in">Canada</option>
+                                    <option value="site:mx.linkedin.com/in">Mexico</option>
+                                </optgroup>
+                                <optgroup label="EMEA (Europe, Middle East, Africa)">
+                                    <option value="site:uk.linkedin.com/in">United Kingdom</option>
+                                    <option value="site:de.linkedin.com/in">Germany</option>
+                                    <option value="site:fr.linkedin.com/in">France</option>
+                                    <option value="site:es.linkedin.com/in">Spain</option>
+                                    <option value="site:it.linkedin.com/in">Italy</option>
+                                    <option value="site:nl.linkedin.com/in">Netherlands</option>
+                                    <option value="site:ie.linkedin.com/in">Ireland</option>
+                                    <option value="site:ae.linkedin.com/in">United Arab Emirates</option>
+                                    <option value="site:se.linkedin.com/in">Sweden</option>
+                                    <option value="site:dk.linkedin.com/in">Denmark</option>
+                                    <option value="site:fi.linkedin.com/in">Finland</option>
+                                    <option value="site:no.linkedin.com/in">Norway</option>
+                                    <option value="site:at.linkedin.com/in">Austria</option>
+                                    <option value="site:ch.linkedin.com/in">Switzerland</option>
+                                </optgroup>
+                                <optgroup label="APAC (Asia-Pacific)">
+                                    <option value="site:jp.linkedin.com/in">Japan</option>
+                                    <option value="site:au.linkedin.com/in">Australia</option>
+                                    <option value="site:sg.linkedin.com/in">Singapore</option>
+                                    <option value="site:in.linkedin.com/in">India</option>
+                                    <option value="site:cn.linkedin.com/in">China</option>
+                                    <option value="site:kr.linkedin.com/in">Korea</option>
+                                </optgroup>
+                                <optgroup label="LATAM (Latin America)">
+                                    <option value="site:br.linkedin.com/in">Brazil</option>
+                                    <option value="site:mx.linkedin.com/in">Mexico</option>
+                                    <option value="site:ar.linkedin.com/in">Argentina</option>
+                                    <option value="site:co.linkedin.com/in">Colombia</option>
+                                </optgroup>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="mt-4">
+                        <label for="cityOperator" class="block text-sm font-medium text-gray-200 mb-1">Town/City (Optional):</label>
+                        <input type="text" id="cityOperator" placeholder="e.g., London" class="w-full rounded-md border-gray-600 shadow-sm focus:border-okta-blue focus:ring-okta-blue p-2 text-gray-900 bg-gray-200">
+                    </div>
+                </div>
+                
+                <!-- Okta Hub Locations -->
+                <div class="bg-gray-700 p-5 rounded-xl border border-gray-600 shadow-inner">
+                    <h2 class="text-lg font-semibold text-white mb-3">Okta Hub Locations</h2>
+                    <p class="text-sm text-gray-300 mb-4">Select one or more Okta hub locations to add to your query. Hold `Ctrl` or `Cmd` to select multiple locations.</p>
+                    <div>
+                        <label for="oktaHubLocation" class="block text-sm font-medium text-gray-200 mb-1">Select Hub Location(s):</label>
+                        <select id="oktaHubLocation" multiple size="6" class="w-full rounded-md border-gray-600 shadow-sm focus:border-okta-blue focus:ring-okta-blue p-2 text-gray-900 bg-gray-200">
+                        </select>
+                    </div>
+                </div>
+                
+                <!-- REMOVED: Find Competitors Section -->
+
+                <!-- Companies Section -->
+                <div id="company-section" class="bg-gray-700 p-5 rounded-xl border border-gray-600 shadow-inner movable-field">
+                    <div class="field-group justify-between items-start">
+                        <div>
+                            <h2 class="text-lg font-semibold text-white mb-1">Companies (<span id="companyOperatorDisplay">inanchor: |</span> or OR)</h2>
+                            <p id="companyDescription" class="text-sm text-gray-300 mb-4">Enter company names separated by commas or newlines. They will be converted to an **`inanchor:`** search string, which targets profiles linking to those company websites.</p>
+                        </div>
+                        <div class="move-button"></div>
+                    </div>
+                    <div class="mb-4">
+                        <label for="companySearchMode" class="block text-sm font-medium text-gray-200 mb-1">Search Mode:</label>
+                        <select id="companySearchMode" onchange="window.updateCompanyDescription()" class="w-full rounded-md border-gray-600 shadow-sm focus:border-okta-blue focus:ring-okta-blue p-2 text-gray-900 bg-gray-200">
+                            <option value="INANCHOR">inanchor:company1|company2 (Recommended)</option>
+                            <option value="OR">"company 1" OR "company 2" (Plain OR/Text Search)</option>
+                        </select>
+                    </div>
+                    <label for="companyList" class="block text-sm font-medium text-gray-200 mb-1">List of Companies:</label>
+                    <textarea id="companyList" rows="3" placeholder="e.g., apple, google, microsoft&#10;or on new lines:&#10;amazon&#10;ibm" class="w-full rounded-md border-gray-600 shadow-sm focus:border-okta-blue focus:ring-okta-blue p-2 text-gray-900 bg-gray-200"></textarea>
+                    <!-- REMOVED: Copy to Notepad button -->
+                </div>
+
+                <!-- Job Titles Section -->
+                <div id="job-titles-section" class="bg-gray-700 p-5 rounded-xl border border-gray-600 shadow-inner movable-field">
+                    <div class="field-group justify-between items-start">
+                        <div>
+                            <h2 class="text-lg font-semibold text-white mb-1">Job Titles (<span id="jobTitleOperatorDisplay">intitle: |</span> or OR)</h2>
+                            <p id="jobTitleDescription" class="text-sm text-gray-300 mb-4">Enter job titles. They will use the **`intitle:`** operator for accuracy. Titles are combined with **OR** logic.</p>
+                        </div>
+                        <div class="move-button"></div>
+                    </div>
+                    <div class="mb-4">
+                        <label for="jobTitleSearchMode" class="block text-sm font-medium text-gray-200 mb-1">Search Mode:</label>
+                        <select id="jobTitleSearchMode" onchange="window.updateJobTitleDescription()" class="w-full rounded-md border-gray-600 shadow-sm focus:border-okta-blue focus:ring-okta-blue p-2 text-gray-900 bg-gray-200">
+                            <option value="INTITLE">intitle:"Title 1" OR intitle:"Title 2" (Recommended)</option>
+                            <option value="OR">"Title 1" OR "Title 2" (Plain OR/Text Search)</option>
+                        </select>
+                    </div>
+                    <div class="mb-4">
+                        <label for="jobTitleList" class="block text-sm font-medium text-gray-200 mb-1">List of Job Titles (Combined with OR):</label>
+                        <textarea id="jobTitleList" rows="3" placeholder="e.g., 'Software Engineer', 'SRE'&#10;or on new lines:&#10;Recruiter&#10;Sourcer" class="w-full rounded-md border-gray-600 shadow-sm focus:border-okta-blue focus:ring-okta-blue p-2 text-gray-900 bg-gray-200"></textarea>
+                    </div>
+                </div>
+                
+                <!-- REMOVED: Natural Language Search Section (AI) -->
+
+                <!-- Keywords Section -->
+                <div id="keywords-section" class="bg-gray-700 p-5 rounded-xl border border-gray-600 shadow-inner movable-field">
+                    <div class="field-group justify-between items-start">
+                        <div>
+                            <h2 class="text-lg font-semibold text-white mb-1">Keywords & Phrases</h2>
+                            <p class="text-sm text-gray-300 mb-4">Use these fields to add other keywords and skills to your search string (only 2 groups remaining).</p>
+                        </div>
+                        <div class="move-button"></div>
+                    </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <!-- Group 1 -->
+                        <div class="flex flex-col">
+                            <label for="keywords1" class="block text-sm font-medium text-gray-200 mb-1">Group 1 (AND/OR):</label>
+                            <div class="flex gap-2">
+                                <select id="keywords1Operator" data-default="OR" class="rounded-md border-gray-600 shadow-sm focus:border-okta-blue focus:ring-okta-blue p-2 text-gray-900 bg-gray-200">
+                                    <option value="AND">AND</option>
+                                    <option value="OR" selected>OR</option>
+                                </select>
+                                <input type="text" id="keywords1" placeholder="e.g., engineer, developer" class="flex-1 rounded-md border-gray-600 shadow-sm focus:border-okta-blue focus:ring-okta-blue p-2 text-gray-900 bg-gray-200">
+                            </div>
+                        </div>
+                        <!-- Group 2 -->
+                        <div class="flex flex-col">
+                            <label for="keywords2" class="block text-sm font-medium text-gray-200 mb-1">Group 2 (AND/OR):</label>
+                            <div class="flex gap-2">
+                                <select id="keywords2Operator" data-default="AND" class="rounded-md border-gray-600 shadow-sm focus:border-okta-blue focus:ring-okta-blue p-2 text-gray-900 bg-gray-200">
+                                    <option value="AND" selected>AND</option>
+                                    <option value="OR">OR</option>
+                                </select>
+                                <input type="text" id="keywords2" placeholder="e.g., python, react, aws" class="flex-1 rounded-md border-gray-600 shadow-sm focus:border-okta-blue focus:ring-okta-blue p-2 text-gray-900 bg-gray-200">
+                            </div>
+                        </div>
+                        <!-- REMOVED: Group 3 and Group 4 -->
+                    </div>
+                    
+                    <div class="mt-4">
+                        <label for="exactPhrase" class="block text-sm font-medium text-gray-200 mb-1">Exact Phrase (Optional):</label>
+                        <input type="text" id="exactPhrase" placeholder="e.g., 'machine learning engineer'" class="w-full rounded-md border-gray-600 shadow-sm focus:border-okta-blue focus:ring-okta-blue p-2 text-gray-900 bg-gray-200">
+                    </div>
+                </div>
+
+                <!-- Proximity Search Section (AROUND) -->
+                <div id="proximity-section" class="bg-gray-700 p-5 rounded-xl border border-gray-600 shadow-inner movable-field">
+                    <div class="field-group justify-between items-start">
+                        <div>
+                            <h2 class="text-lg font-semibold text-white mb-1">Proximity Search (AROUND)</h2>
+                            <!-- UPDATED: AROUND(15) is now reflected in the description -->
+                            <p class="text-sm text-gray-300 mb-4">Find two keywords that appear within **15 words** of each other in a search result. E.g. "project manager" will find "manager of projects" or "projects and people manager".</p>
+                        </div>
+                        <div class="move-button"></div>
+                    </div>
+                    <label for="proximityKeywords" class="block text-sm font-medium text-gray-200 mb-1">Two Words/Phrases (e.g., "Account Executive" Federal):</label>
+                    <input type="text" id="proximityKeywords" placeholder="e.g., 'python AWS'" class="w-full rounded-md border-gray-600 shadow-sm focus:border-okta-blue focus:ring-okta-blue p-2 text-gray-900 bg-gray-200">
+                </div>
+                
+                <!-- Headline & About Section -->
+                <div id="headline-about-section" class="bg-gray-700 p-5 rounded-xl border border-gray-600 shadow-inner movable-field">
+                    <div class="field-group justify-between items-start">
+                        <div>
+                            <h2 class="text-lg font-semibold text-white mb-1">Headline & About (Optional)</h2>
+                            <p class="text-sm text-gray-300 mb-4">Search for keywords that appear in a profile's headline or 'about' section on sites like LinkedIn.</p>
+                        </div>
+                        <div class="move-button"></div>
+                    </div>
+                    <label for="headlineAboutKeywords" class="block text-sm font-medium text-gray-200 mb-1">Keywords:</label>
+                    <input type="text" id="headlineAboutKeywords" placeholder="e.g., product manager" class="w-full rounded-md border-gray-600 shadow-sm focus:border-okta-blue focus:ring-okta-blue p-2 text-gray-900 bg-gray-200">
+                    </div>
+
+                <!-- Sales Club Winners Section -->
+                <div id="sales-winners-section" class="bg-gray-700 p-5 rounded-xl border border-gray-600 shadow-inner movable-field">
+                    <div class="field-group justify-between items-start">
+                        <div>
+                            <h2 class="text-lg font-semibold text-white mb-1">Sales Club Winners</h2>
+                            <p class="text-sm text-gray-300 mb-4">Click the button to add a comprehensive Boolean string that targets high-performing sales professionals recognized with internal awards (e.g., President's Club, Chairman's Club, etc.).</p>
+                        </div>
+                        <div class="move-button"></div>
+                    </div>
+                    <button onclick="window.addSalesClubWinners()" class="w-full bg-okta-blue text-white font-bold py-3 px-6 rounded-lg shadow-md hover:bg-okta-blue/80 transition duration-200 text-sm">
+                        Find Winners
+                    </button>
+                </div>
+
+                <!-- Email ID's Section -->
+                <div id="email-section" class="bg-gray-700 p-5 rounded-xl border border-gray-600 shadow-inner movable-field">
+                    <div class="field-group justify-between items-start">
+                        <div>
+                            <h2 class="text-lg font-semibold text-white mb-1">Email ID's listed</h2>
+                            <p class="text-sm text-gray-300 mb-4">Generate a query first using the above options, then press the "Add email domains" button afterwards. The generated Boolean string will update. This may help find emails that people have publicly listed in their bio's.</p>
+                        </div>
+                        <div class="move-button"></div>
+                    </div>
+                    <button onclick="window.addEmailDomains()" class="w-full bg-okta-blue text-white font-bold py-3 px-6 rounded-lg shadow-md hover:bg-okta-blue/80 transition duration-200 text-sm">
+                        Add Email Domains
+                    </button>
+                </div>
+
+                <!-- Exclusions Section -->
+                <div id="exclusions-section" class="bg-red-900/40 p-5 rounded-xl border border-red-800 shadow-inner movable-field">
+                    <div class="field-group justify-between items-start">
+                        <div>
+                            <h2 class="text-lg font-semibold text-red-300 mb-1">Exclusions (-)</h2>
+                            <p class="text-sm text-red-300 mb-4">Exclude unwanted keywords from your search results.</p>
+                        </div>
+                        <div class="move-button"></div>
+                    </div>
+                    <label for="excludeKeywords" class="block text-sm font-medium text-red-300 mb-1">Keywords to Exclude (-):</label>
+                    <input type="text" id="excludeKeywords" placeholder="e.g., manager, cto, intern" class="w-full rounded-md border-red-600 shadow-sm focus:border-red-500 focus:ring-red-500 p-2 text-gray-900 bg-gray-200">
+                </div>
+                
+                <!-- REMOVED: geminiFeaturesSection -->
+                <!-- REMOVED: addGeminiFeatureBtn -->
+
+                <div class="mt-6">
+                    <label for="outputString" class="block text-sm font-medium text-gray-200 mb-1">Generated Boolean String:</label>
+                    <textarea id="outputString" rows="4" class="w-full rounded-md border-gray-600 shadow-sm bg-gray-200 p-3 text-gray-900"></textarea>
+                </div>
+
+                <!-- Buttons and Output -->
+                <div class="flex flex-col sm:flex-row gap-4 mt-4">
+                    <button id="generateQueryBtn" onclick="window.generateQuery()" class="flex-1 bg-okta-blue text-white font-bold py-3 px-6 rounded-lg shadow-md hover:bg-okta-blue/80 transition duration-200">
+                        Generate Query
+                    </button>
+                    <button id="copyToClipboardBtn" onclick="window.copyToClipboard()" class="flex-1 bg-gray-600 text-white font-bold py-3 px-6 rounded-lg shadow-md hover:bg-gray-500 transition duration-200">
+                        Copy to Clipboard
+                    </button>
+                </div>
+
+                <div class="mt-6 flex flex-col sm:flex-row gap-4">
+                    <button id="openInGoogleBtn" onclick="window.openInBrowser('Google')" class="flex-1 bg-okta-blue text-white font-bold py-3 px-6 rounded-lg shadow-md hover:bg-okta-blue/80 transition duration-200">
+                        Open in Google
+                    </button>
+                    <button onclick="window.copyToNotepad()" class="flex-1 bg-gray-600 text-white font-bold py-3 px-6 rounded-lg shadow-md hover:bg-gray-500 transition duration-200">
+                        Copy to Notepad
+                    </button>
+                </div>
+              
+                <!-- CLEAR ALL BUTTON -->
+                <div class="mt-6 flex flex-col sm:flex-row gap-4">
+                    <button id="clearFieldsBtn" onclick="window.clearFields()" class="flex-1 bg-red-500 text-white font-bold py-3 px-6 rounded-lg shadow-md hover:bg-red-600 transition duration-200">
+                        Clear All
+                    </button>
+                </div>
+
+                <div id="messageBox" class="hidden mt-4 p-3 rounded-md text-sm text-center font-medium transition duration-300"></div>
+            </div>
+
+            <!-- Kaggle.com Search Section -->
+            <div id="kaggleSearchSection" class="bg-gray-700 p-5 rounded-xl border border-gray-600 shadow-inner hidden">
+                <h2 class="text-lg font-semibold text-white mb-3">Kaggle.com Search</h2>
+                <p class="text-sm text-gray-300 mb-4">Search for data scientists and machine learning experts on Kaggle.</p>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                        <label for="kaggleSkills" class="block text-sm font-medium text-gray-200 mb-1">Skills or Job Titles (separated by commas):</label>
+                        <input type="text" id="kaggleSkills" placeholder="e.g., data scientist, machine learning" class="w-full rounded-md border-gray-600 shadow-sm focus:border-okta-blue focus:ring-okta-blue p-2 text-gray-900 bg-gray-200">
+                    </div>
+                    <div>
+                        <label for="kaggleLocation" class="block text-sm font-medium text-gray-200 mb-1">Location (country, city, or town):</label>
+                        <input type="text" id="kaggleLocation" placeholder="e.g., Finland" class="w-full rounded-md border-gray-600 shadow-sm focus:border-okta-blue focus:ring-okta-blue p-2 text-gray-900 bg-gray-200">
+                    </div>
+                </div>
+                <div class="mt-4">
+                    <button onclick="window.openInKaggle()" class="w-full bg-okta-blue text-white font-bold py-3 px-6 rounded-lg shadow-md hover:bg-okta-blue/80 transition duration-200">
+                        Open in Google
+                    </button>
+                </div>
+            </div>
+
+            <!-- Github.io Search Section -->
+            <div id="githubioSearchSection" class="bg-gray-700 p-5 rounded-xl border border-gray-600 shadow-inner hidden">
+                <h2 class="text-lg font-semibold text-white mb-3">Github.io (Tech)</h2>
+                <p class="text-sm text-gray-300 mb-4">Search for technical professionals on Github.io. The query automatically includes `~resume` to help you find their CVs.</p>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                        <label for="githubioSkills" class="block text-sm font-medium text-gray-200 mb-1">Skills or Job Titles (OR):</label>
+                        <input type="text" id="githubioSkills" placeholder="e.g., kubernetes, python" class="w-full rounded-md border-gray-600 shadow-sm focus:border-okta-blue focus:ring-okta-blue p-2 text-gray-900 bg-gray-200">
+                    </div>
+                    <div>
+                        <label for="githubioLocation" class="block text-sm font-medium text-gray-200 mb-1">Location:</label>
+                        <input type="text" id="githubioLocation" placeholder="e.g., Bangalore" class="w-full rounded-md border-gray-600 shadow-sm focus:border-okta-blue focus:ring-okta-blue p-2 text-gray-900 bg-gray-200">
+                    </div>
+                </div>
+                <div class="mt-4">
+                    <button onclick="window.openInGithubIo()" class="w-full bg-okta-blue text-white font-bold py-3 px-6 rounded-lg shadow-md hover:bg-okta-blue/80 transition duration-200">
+                        Open in Google
+                    </button>
+                </div>
+            </div>
+          
+            <!-- REMOVED: About.me Search Section -->
+        </div>
+    </div>
+</body>
+</html>
