@@ -7,3 +7,6 @@ Main purpose:
 Generate Boolean search strings for sites like LinkedIn, GitHub, Google, Stack Overflow, Behance, Dribbble, Kaggle, GitHub Pages, Quora, Reddit, and more.
 Combine terms like company names, job titles, keywords, locations, and exclusions into a final query.
 Copy or open the generated search directly in a browser.
+
+
+No sign-up & free to use
